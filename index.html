@@ -157,6 +157,19 @@ let game = { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0
 let settings = { firebaseConfig:null };
 let fbApp = null, db = null, auth = null, authUser = null;
 
+// This is Lulworth family's shared Firebase project config. It is not a secret, it is a
+// public identifier, protection comes entirely from the Firestore security rules published
+// on that project (see spelling-practice-setup.md). Baking it in here means nobody needs to
+// paste anything, the app connects automatically as soon as it's opened.
+const DEFAULT_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDdQLlWTv0EwuY2ev5OLqzKsSgqQin5r2U",
+  authDomain: "spelling-app-83697.firebaseapp.com",
+  projectId: "spelling-app-83697",
+  storageBucket: "spelling-app-83697.firebasestorage.app",
+  messagingSenderId: "972390353141",
+  appId: "1:972390353141:web:483aeee0704ae46247ddbc"
+};
+
 const EXTRACT_PROMPT = "This photo shows a child's Spanish vocabulary list, with Spanish words and their English translations, in whatever column order they appear. Read every word pair on the page. Respond with ONLY a valid JSON array, no markdown fences, no commentary, in this exact format: [{\"spanish\":\"palabra\",\"english\":\"word\"}]. Keep the original spelling, capitalisation and accents exactly as written. If a word is hard to read, give your best reading rather than skipping it.";
 
 function uid(){ return 'w' + Date.now() + Math.random().toString(36).slice(2,7); }
@@ -397,8 +410,10 @@ async function extractWords(b64){
 // ---------- init ----------
 async function init(){
   settings = loadSettings();
-  if(settings.firebaseConfig){
-    initFirebase(settings.firebaseConfig);
+  const config = settings.firebaseConfig || DEFAULT_FIREBASE_CONFIG;
+  if(config){
+    settings.firebaseConfig = config;
+    initFirebase(config);
     state.view = 'login';
   }else{
     state.view = 'settings';
