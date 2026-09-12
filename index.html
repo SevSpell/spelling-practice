@@ -101,6 +101,11 @@
   .ok-box{ background:rgba(61,131,97,0.08);border:1.5px solid var(--correct);color:var(--correct); border-radius:12px;padding:0.8rem 1rem;font-size:0.92rem;margin-bottom:1rem; }
   .status-line{font-size:0.9rem;margin-top:0.5rem;}
   .signed-in-line{font-size:0.9rem;color:var(--ink-soft);margin:-0.6rem 0 1rem 0;}
+  .sevling-icon{ display:flex; align-items:center; justify-content:center; }
+  .item-emoji.sevling-icon{ width:2.6rem; height:2.6rem; margin:0 auto 0.3rem auto; }
+  .reward-icon.sevling-icon{ width:4rem; height:4rem; margin:0.2rem auto; }
+  .sevling-icon svg{ width:100%; height:100%; display:block; }
+  .sevling-worn-badges{ font-size:0.95rem; margin-bottom:0.2rem; }
   @media (prefers-reduced-motion: reduce){ .spinner{animation:none;} .blob{animation:none;top:20px;} }
 </style>
 </head>
@@ -115,41 +120,74 @@ import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, se
 
 const app = document.getElementById('app');
 
-const SHOP_ITEMS = [
-  { id:'cat', name:'Cat', emoji:'\uD83D\uDC31', category:'pet', price:2, unlockAt:0 },
-  { id:'dog', name:'Dog', emoji:'\uD83D\uDC36', category:'pet', price:2, unlockAt:0 },
-  { id:'sunglasses', name:'Sunglasses', emoji:'\uD83D\uDD76\uFE0F', category:'outfit', price:2, unlockAt:0 },
-  { id:'scarf', name:'Scarf', emoji:'\uD83E\uDDE3', category:'outfit', price:2, unlockAt:0 },
-  { id:'radio', name:'Radio', emoji:'\uD83D\uDCFB', category:'decor', price:3, unlockAt:0 },
-  { id:'headphones', name:'Headphones', emoji:'\uD83C\uDFA7', category:'decor', price:2, unlockAt:0 },
-  { id:'plant', name:'Plant', emoji:'\uD83E\uDEB4', category:'decor', price:2, unlockAt:0 },
-  { id:'rug', name:'Rug', emoji:'\uD83D\uDFEA', category:'decor', price:2, unlockAt:0 },
-  { id:'rabbit', name:'Rabbit', emoji:'\uD83D\uDC30', category:'pet', price:3, unlockAt:5 },
-  { id:'hamster', name:'Hamster', emoji:'\uD83D\uDC39', category:'pet', price:2, unlockAt:5 },
-  { id:'tophat', name:'Top hat', emoji:'\uD83C\uDFA9', category:'outfit', price:3, unlockAt:5 },
-  { id:'lavalamp', name:'Lava lamp', emoji:null, category:'decor', price:5, unlockAt:5 },
-  { id:'bookshelf', name:'Bookshelf', emoji:'\uD83D\uDCDA', category:'decor', price:3, unlockAt:5 },
-  { id:'hedgehog', name:'Hedgehog', emoji:'\uD83E\uDD94', category:'pet', price:3, unlockAt:10 },
-  { id:'turtle', name:'Turtle', emoji:'\uD83D\uDC22', category:'pet', price:3, unlockAt:10 },
-  { id:'cape', name:'Cape', emoji:'\uD83E\uDDB8', category:'outfit', price:4, unlockAt:10 },
-  { id:'guitar', name:'Guitar', emoji:'\uD83C\uDFB8', category:'decor', price:4, unlockAt:10 },
-  { id:'parrot', name:'Parrot', emoji:'\uD83E\uDD9C', category:'pet', price:4, unlockAt:15 },
-  { id:'wizardhat', name:'Wizard hat', emoji:'\uD83E\uDDD9', category:'outfit', price:5, unlockAt:15 },
-  { id:'crown', name:'Crown', emoji:'\uD83D\uDC51', category:'outfit', price:6, unlockAt:20 },
-  { id:'gameconsole', name:'Games console', emoji:'\uD83C\uDFAE', category:'decor', price:5, unlockAt:20 },
-  { id:'discoball', name:'Disco ball', emoji:'\uD83E\uDE85', category:'decor', price:6, unlockAt:25 },
-  { id:'unicorn', name:'Unicorn', emoji:'\uD83E\uDD84', category:'pet', price:8, unlockAt:30 }
+const SEVLING_BODY = 'M60,15 C85,15 100,40 100,65 C100,95 82,110 60,110 C38,110 20,95 20,65 C20,40 35,15 60,15 Z';
+const SEVLINGS = [
+  { id:'fleece', name:'Fleece', collection:'farm', features:'<circle cx="34" cy="34" r="10"/><circle cx="86" cy="34" r="10"/>' },
+  { id:'billy', name:'Billy', collection:'farm', features:'<path d="M40,20 Q24,-10 54,10 Z"/><path d="M80,20 Q96,-10 66,10 Z"/>' },
+  { id:'bessie', name:'Bessie', collection:'farm', features:'<ellipse cx="18" cy="38" rx="11" ry="7"/><ellipse cx="102" cy="38" rx="11" ry="7"/>' },
+  { id:'daisy', name:'Daisy', collection:'farm', features:'<ellipse cx="16" cy="45" rx="11" ry="7" transform="rotate(20 16 45)"/><ellipse cx="104" cy="45" rx="11" ry="7" transform="rotate(-20 104 45)"/>' },
+  { id:'waddle', name:'Waddle', collection:'farm', features:'<path d="M90,72 Q116,62 110,84 Q100,76 98,88 Q110,90 102,102 Q86,96 90,72 Z"/>' },
+  { id:'bray', name:'Bray', collection:'farm', features:'<ellipse cx="42" cy="-8" rx="9" ry="26"/><ellipse cx="78" cy="-8" rx="9" ry="26"/>' },
+  { id:'henrietta', name:'Henrietta', collection:'farm', features:'<path d="M50,15 L55,1 L60,15 L65,4 L69,15 Z"/><path d="M90,72 Q114,62 100,94 Z"/>' },
+  { id:'pepper', name:'Pepper', collection:'farm', features:'<path d="M48,14 L53,2 L58,14 L63,0 L68,14 Z"/><path d="M85,65 Q115,50 108,90 Q98,72 85,78 Z"/>' },
+  { id:'slowie', name:'Slowie', collection:'jungle', features:'<path d="M28,30 Q-15,55 22,92 Q10,60 28,30 Z"/><path d="M92,30 Q135,55 98,92 Q110,60 92,30 Z"/>' },
+  { id:'stripe', name:'Stripe', collection:'jungle', features:'<circle cx="36" cy="18" r="11"/><circle cx="84" cy="18" r="11"/><path d="M98,88 Q112,92 106,78 Z"/>' },
+  { id:'hiss', name:'Hiss', collection:'jungle', noBody:true, features:'<path d="M60,15 C90,15 105,35 95,55 C85,70 60,65 55,80 C50,95 75,100 90,90 C95,105 65,115 45,100 C25,85 35,60 55,50 C35,45 25,25 45,15 C50,12 55,13 60,15 Z"/>' },
+  { id:'spidey', name:'Spidey', collection:'jungle', features:'<ellipse cx="10" cy="40" rx="14" ry="5" transform="rotate(-25 10 40)"/><ellipse cx="10" cy="65" rx="14" ry="5" transform="rotate(25 10 65)"/><ellipse cx="10" cy="90" rx="14" ry="5" transform="rotate(-15 10 90)"/><ellipse cx="10" cy="110" rx="14" ry="5" transform="rotate(15 10 110)"/><ellipse cx="110" cy="40" rx="14" ry="5" transform="rotate(25 110 40)"/><ellipse cx="110" cy="65" rx="14" ry="5" transform="rotate(-25 110 65)"/><ellipse cx="110" cy="90" rx="14" ry="5" transform="rotate(15 110 90)"/><ellipse cx="110" cy="110" rx="14" ry="5" transform="rotate(-15 110 110)"/>' },
+  { id:'scale', name:'Scale', collection:'jungle', features:'<path d="M46,16 L52,-4 L58,16 Z"/><path d="M62,14 L68,-6 L74,14 Z"/><path d="M78,16 L84,-4 L90,16 Z"/><path d="M93,92 Q114,98 102,114 Z"/>' },
+  { id:'kiki', name:'Kiki', collection:'jungle', features:'<circle cx="38" cy="16" r="9"/><circle cx="82" cy="16" r="9"/><path d="M98,70 Q118,75 112,95 Q104,100 100,88 Q106,80 98,70 Z"/>' },
+  { id:'kong', name:'Kong', collection:'jungle', features:'<circle cx="42" cy="20" r="9"/><circle cx="78" cy="20" r="9"/><ellipse cx="60" cy="28" rx="20" ry="6"/>' },
+  { id:'panda', name:'Panda', collection:'jungle', features:'<circle cx="34" cy="16" r="13"/><circle cx="86" cy="16" r="13"/>' },
+  { id:'inky', name:'Inky', collection:'sea', features:'<path d="M28,102 Q22,120 32,116 Q34,106 36,102 Z"/><path d="M43,106 Q39,125 48,120 Q48,110 49,106 Z"/><path d="M58,107 Q56,127 64,123 Q63,111 60,107 Z"/><path d="M62,107 Q64,127 72,123 Q68,111 62,107 Z"/><path d="M77,106 Q81,125 72,120 Q72,110 71,106 Z"/><path d="M92,102 Q98,120 88,116 Q86,106 84,102 Z"/>' },
+  { id:'jaws', name:'Jaws', collection:'sea', features:'<path d="M65,15 L76,-8 L86,17 Z"/><path d="M55,105 L45,120 L62,110 Z"/>' },
+  { id:'clipper', name:'Clipper', collection:'sea', features:'<circle cx="24" cy="55" r="15"/><circle cx="96" cy="55" r="15"/>' },
+  { id:'patrick', name:'Patrick', collection:'sea', noBody:true, features:'<path d="M60,8 L71,42 L107,42 L78,64 L89,100 L60,79 L31,100 L42,64 L13,42 L49,42 Z"/>' },
+  { id:'sword', name:'Sword', collection:'sea', features:'<path d="M24,50 L-28,46 L24,76 Z"/><path d="M65,15 L72,0 L80,17 Z"/>' },
+  { id:'wally', name:'Wally', collection:'sea', features:'<path d="M45,105 Q60,128 75,105 Q60,116 45,105 Z"/><path d="M68,15 L76,2 L84,17 Z"/>' },
+  { id:'lotyl', name:'Lotyl', collection:'sea', features:'<path d="M22,30 Q8,25 12,38 Q20,35 22,30 Z"/><path d="M20,42 Q4,40 10,52 Q18,48 20,42 Z"/><path d="M24,54 Q8,55 16,66 Q22,60 24,54 Z"/><path d="M98,30 Q112,25 108,38 Q100,35 98,30 Z"/><path d="M100,42 Q116,40 110,52 Q102,48 100,42 Z"/><path d="M96,54 Q112,55 104,66 Q98,60 96,54 Z"/>' },
+  { id:'pearl', name:'Pearl', collection:'sea', features:'<ellipse cx="60" cy="50" rx="46" ry="28"/>' },
+  { id:'puggle', name:'Puggle', collection:'pets', features:'<ellipse cx="20" cy="38" rx="11" ry="18" transform="rotate(-10 20 38)"/><ellipse cx="100" cy="38" rx="11" ry="18" transform="rotate(10 100 38)"/><ellipse cx="60" cy="72" rx="15" ry="10"/>' },
+  { id:'hopper', name:'Hopper', collection:'pets', features:'<ellipse cx="44" cy="-15" rx="8" ry="32"/><ellipse cx="76" cy="-15" rx="8" ry="32"/>' },
+  { id:'puff', name:'Puff', collection:'pets', features:'<path d="M32,22 L28,4 L46,16 Z"/><path d="M88,22 L92,4 L74,16 Z"/>' },
+  { id:'tabby', name:'Tabby', collection:'pets', features:'<path d="M34,20 L31,2 L48,15 Z"/><path d="M86,20 L89,2 L72,15 Z"/><path d="M96,85 Q114,90 108,72 Z"/>' },
+  { id:'barnaby', name:'Barnaby', collection:'pets', features:'<ellipse cx="16" cy="40" rx="12" ry="24" transform="rotate(-12 16 40)"/><ellipse cx="104" cy="40" rx="12" ry="24" transform="rotate(12 104 40)"/>' },
+  { id:'cheeks', name:'Cheeks', collection:'pets', features:'<circle cx="42" cy="16" r="7"/><circle cx="78" cy="16" r="7"/><circle cx="22" cy="72" r="15"/><circle cx="98" cy="72" r="15"/>' },
+  { id:'sunny', name:'Sunny', collection:'pets', features:'<ellipse cx="18" cy="42" rx="10" ry="20" transform="rotate(-10 18 42)"/><ellipse cx="102" cy="42" rx="10" ry="20" transform="rotate(10 102 42)"/><circle cx="45" cy="10" r="8"/><circle cx="60" cy="6" r="9"/><circle cx="75" cy="10" r="8"/>' },
+  { id:'bubbles', name:'Bubbles', collection:'pets', features:'<path d="M16,58 L2,50 L16,72 Z"/><path d="M104,58 L118,50 L104,72 Z"/><path d="M92,92 Q115,78 112,105 Q100,98 92,92 Z"/>' },
+  { id:'clover', name:'Clover', collection:'pets', features:'<ellipse cx="44" cy="-2" rx="7" ry="22"/><ellipse cx="76" cy="-2" rx="7" ry="22"/><circle cx="30" cy="14" r="6"/><circle cx="38" cy="8" r="6"/><circle cx="48" cy="6" r="6"/>' },
+  { id:'pippin', name:'Pippin', collection:'pets', features:'<circle cx="28" cy="14" r="17"/><circle cx="92" cy="14" r="17"/><path d="M50,95 L74,95 L62,108 Z"/>' }
+];
+const COLLECTIONS = [['farm','Farm'],['jungle','Jungle'],['sea','Sea'],['pets','Pets']];
+const COLLECTION_COLORS = { farm:'#D9A679', jungle:'#6B8F71', sea:'#4A7C96', pets:'#B98C63' };
+const SEVLING_LOCKED_COLOR = '#3A4C63';
+function sevlingSvg(s, color){
+  const body = s.noBody ? '' : `<path d="${SEVLING_BODY}"/>`;
+  return `<svg viewBox="-50 -60 220 220" fill="${color}">${body}${s.features||''}</svg>`;
+}
+const FOOD_ITEMS = [
+  { id:'carrot', name:'Carrot', emoji:'\u{1F955}', price:1, happiness:8 },
+  { id:'apple', name:'Apple', emoji:'\u{1F34E}', price:1, happiness:8 },
+  { id:'honey', name:'Honey', emoji:'\u{1F36F}', price:2, happiness:15 },
+  { id:'cake', name:'Cake', emoji:'\u{1F370}', price:3, happiness:25 }
+];
+const ACCESSORY_ITEMS = [
+  { id:'bow', name:'Bow', emoji:'\u{1F380}', price:3 },
+  { id:'scarf', name:'Scarf', emoji:'\u{1F9E3}', price:3 },
+  { id:'sunglasses', name:'Sunglasses', emoji:'\u{1F576}\u{FE0F}', price:3 },
+  { id:'flowercrown', name:'Flower crown', emoji:'\u{1F338}', price:3 },
+  { id:'tophat', name:'Top hat', emoji:'\u{1F3A9}', price:4 },
+  { id:'crown', name:'Crown', emoji:'\u{1F451}', price:5 }
 ];
 const TROPHY_ADJ = ['Sparkling','Shining','Golden','Dazzling','Marvellous','Brilliant','Glittering'];
 
 const state = {
   view: 'settings', lists: [], currentListId: null,
   uploadImageB64: null, uploadImagePreview: null, extractedWords: [], listLabelDraft: '',
-  busy: false, error: '', settingsMessage: '', firebaseConfigDraft: '', shopTab: 'pet', authMode: 'signin',
-  practice: { mode:null, words:[], index:0, score:0, wrong:[], checked:false, lastCorrect:false, input:'', isRetry:false, reward:null, trophyVariant:null, milestoneHit:false }
+  busy: false, error: '', settingsMessage: '', firebaseConfigDraft: '', currentSevlingId: null, authMode: 'signin',
+  practice: { mode:null, words:[], index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:false, reward:null, trophyVariant:null, newSevling:null }
 };
 
-let game = { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, inventory:[], equippedOutfit:null };
+let game = { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, perfectStreak:0, streakGoal:4, lastSevlingAt:null, cooldownDays:14 };
 let settings = { firebaseConfig:null };
 let fbApp = null, db = null, auth = null, authUser = null;
 
@@ -166,12 +204,13 @@ const DEFAULT_FIREBASE_CONFIG = {
   appId: "1:972390353141:web:483aeee0704ae46247ddbc"
 };
 
-const EXTRACT_PROMPT = "This photo shows a child's Spanish vocabulary list, with Spanish words and their English translations, in whatever column order they appear. Read every word pair on the page. Respond with ONLY a valid JSON array, no markdown fences, no commentary, in this exact format: [{\"spanish\":\"palabra\",\"english\":\"word\"}]. Keep the original spelling, capitalisation and accents exactly as written. If a word is hard to read, give your best reading rather than skipping it.";
+const EXTRACT_PROMPT = "This photo shows a child's Spanish vocabulary list, with Spanish words and their English translations, in whatever column order they appear. Read every word pair on the page. Ignore any list numbers, bullet points, or other list markers next to each word, they are not part of the word itself. Do not include leading punctuation such as \u00bf or \u00a1, just the word or phrase. Respond with ONLY a valid JSON array, no markdown fences, no commentary, in this exact format: [{\"spanish\":\"palabra\",\"english\":\"word\"}]. Keep the original spelling, capitalisation and accents exactly as written, aside from list numbering and leading \u00bf/\u00a1. If a word is hard to read, give your best reading rather than skipping it.";
 
 function uid(){ return 'w' + Date.now() + Math.random().toString(36).slice(2,7); }
 function genInviteCode(){ return Math.random().toString(36).slice(2,8).toUpperCase(); }
 function todayLabel(){ return new Date().toLocaleDateString('en-GB',{ day:'numeric', month:'long', year:'numeric' }); }
-function normalise(s){ return (s||'').trim().toLowerCase(); }
+function normaliseBase(s){ return (s||'').trim().toLowerCase().replace(/[.,!?¿¡'";:()\-]/g,'').replace(/\s+/g,' ').trim(); }
+function stripAccents(s){ return (s||'').normalize('NFD').replace(/\u0301/g,'').normalize('NFC'); }
 function shuffle(arr){ const a=arr.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
 function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function speak(text, lang){
@@ -318,7 +357,7 @@ async function deleteList(id){
   await saveIndex(idx);
 }
 async function loadGame(){
-  const empty = { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, inventory:[], equippedOutfit:null };
+  const empty = { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, perfectStreak:0, streakGoal:4, lastSevlingAt:null, cooldownDays:14 };
   try{
     const d = await fsGet('data','game');
     if(d) return Object.assign(empty, d);
@@ -403,7 +442,15 @@ async function extractWords(b64){
   if(!raw) throw new Error('No text in the response, the photo may be unclear.');
   const parsed = JSON.parse(raw);
   if(!Array.isArray(parsed)) throw new Error('Unexpected response.');
-  return parsed.map(w=>({ spanish:(w.spanish||'').trim(), english:(w.english||'').trim() })).filter(w=>w.spanish||w.english);
+  return parsed.map(w=>({ spanish:cleanExtractedWord(w.spanish), english:cleanExtractedWord(w.english) })).filter(w=>w.spanish||w.english);
+}
+function cleanExtractedWord(s){
+  return (s||'')
+    .trim()
+    .replace(/^[\(\[]?\d+[\)\].:]?\s*/, '')
+    .replace(/^[\u00bf\u00a1]+\s*/, '')
+    .replace(/\s*[\u00bf\u00a1]+$/, '')
+    .trim();
 }
 
 // ---------- init ----------
@@ -425,7 +472,7 @@ function refreshBadge(){
   const el = document.getElementById('balance-badge');
   const totalMedals = game.medals.trophy + game.medals.gold + game.medals.silver + game.medals.bronze;
   el.innerHTML = `<span>\uD83C\uDFC5 ${totalMedals}</span><span>\u00A3${game.balance}</span>`;
-  el.onclick = ()=>{ if(authUser) state.view = 'room'; render(); };
+  el.onclick = ()=>{ if(authUser) state.view = 'sevlings'; render(); };
 }
 function wireSpeakButtons(){
   document.querySelectorAll('.speak-btn').forEach(b=>{
@@ -440,8 +487,7 @@ function wireNav(){
 function navRow(active){
   return `<div class="btn-row nav-row">
     <button class="btn-secondary ${active==='home'?'tab-active':''}" data-nav="home">Home</button>
-    <button class="btn-secondary ${active==='shop'?'tab-active':''}" data-nav="shop">Shop</button>
-    <button class="btn-secondary ${active==='room'?'tab-active':''}" data-nav="room">My room</button>
+    <button class="btn-secondary ${active==='sevlings'?'tab-active':''}" data-nav="sevlings">Sevlings</button>
     <button class="btn-secondary ${active==='settings'?'tab-active':''}" data-nav="settings">Settings</button>
   </div>`;
 }
@@ -456,8 +502,8 @@ function render(){
   else if(state.view==='review') renderReview();
   else if(state.view==='practice') renderPractice();
   else if(state.view==='results') renderResults();
-  else if(state.view==='shop') renderShop();
-  else if(state.view==='room') renderRoom();
+  else if(state.view==='sevlings') renderSevlings();
+  else if(state.view==='sevling-care') renderSevlingCare();
   else if(state.view==='settings') renderSettings();
   wireSpeakButtons(); wireNav(); refreshBadge();
 }
@@ -781,7 +827,7 @@ async function startPractice(mode){
   if(!db || !authUser){ state.error = 'Sign in first.'; state.view='login'; render(); return; }
   const words = await getListWords(state.currentListId);
   if(!words.length){ state.error = "That list seems to be empty."; state.view='home'; render(); return; }
-  state.practice = { mode, words: shuffle(words), index:0, score:0, wrong:[], checked:false, lastCorrect:false, input:'', isRetry:false, reward:null, trophyVariant:null, milestoneHit:false };
+  state.practice = { mode, words: shuffle(words), index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:false, reward:null, trophyVariant:null, newSevling:null };
   state.error=''; state.view = 'practice'; render();
 }
 
@@ -819,14 +865,22 @@ function renderPractice(){
   document.getElementById('btn-quit').onclick = ()=>{ if(confirm('Stop this practice session?')){ state.view='home'; render(); } };
 }
 function feedbackHtml(p, word){
-  if(p.lastCorrect) return `<div class="feedback ok">Correct!</div>`;
+  if(p.lastCorrect){
+    if(p.accentMissing) return `<div class="feedback ok">Correct!<span class="answer">Don't forget the accent next time: ${escapeHtml(word.spanish)} ${speakBtn(word.spanish,'es-ES')}</span></div>`;
+    return `<div class="feedback ok">Correct!</div>`;
+  }
   return `<div class="feedback no">Not quite<span class="answer">Correct spelling: ${escapeHtml(word.spanish)} ${speakBtn(word.spanish,'es-ES')}</span></div>`;
 }
 function checkAnswer(word){
   const p = state.practice;
-  const correct = normalise(p.input) === normalise(word.spanish);
-  p.checked = true; p.lastCorrect = correct;
-  if(correct) p.score++; else p.wrong.push(word);
+  const target = normaliseBase(word.spanish);
+  const input = normaliseBase(p.input);
+  const exact = input === target;
+  const matchesIgnoringAccents = stripAccents(input) === stripAccents(target);
+  p.checked = true;
+  p.lastCorrect = exact || matchesIgnoringAccents;
+  p.accentMissing = p.lastCorrect && !exact;
+  if(p.lastCorrect) p.score++; else p.wrong.push(word);
   render();
 }
 function computeReward(wrongCount){
@@ -842,20 +896,61 @@ function randomTrophyVariant(){
 async function nextWord(){
   const p = state.practice;
   if(p.index+1 < p.words.length){
-    p.index++; p.checked = false; p.lastCorrect = false; p.input = ''; render(); return;
+    p.index++; p.checked = false; p.lastCorrect = false; p.accentMissing = false; p.input = ''; render(); return;
   }
   if(!p.isRetry){
     const reward = computeReward(p.wrong.length);
     p.reward = reward;
     if(reward){
-      const before = game.totalEarned;
       game.totalEarned += reward.value; game.balance += reward.value; game.medals[reward.type]++;
-      p.milestoneHit = Math.floor(game.totalEarned/5) > Math.floor(before/5);
       p.trophyVariant = reward.type==='trophy' ? randomTrophyVariant() : null;
-      await saveGame();
     }
+    await checkSevlingUnlock(p);
+    await saveGame();
   }else{ p.reward = null; }
   state.view = 'results'; render();
+}
+function randInt(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
+async function checkSevlingUnlock(p){
+  if(p.wrong.length===0) game.perfectStreak = (game.perfectStreak||0) + 1;
+  const cooldownMs = (game.cooldownDays||14) * 24*60*60*1000;
+  const cooldownReady = !game.lastSevlingAt || (Date.now() - game.lastSevlingAt) >= cooldownMs;
+  const streakReady = game.perfectStreak >= (game.streakGoal||4);
+  if(streakReady && cooldownReady){
+    const locked = SEVLINGS.filter(s=>!game.unlockedSevlings.includes(s.id));
+    if(locked.length){
+      const won = locked[Math.floor(Math.random()*locked.length)];
+      game.unlockedSevlings.push(won.id);
+      game.sevlingCare[won.id] = { happiness:50, accessories:[] };
+      game.perfectStreak = 0;
+      game.streakGoal = randInt(4,5);
+      game.lastSevlingAt = Date.now();
+      game.cooldownDays = randInt(14,21);
+      p.newSevling = won;
+    }
+  }
+}
+function collectionLabel(id){ return ({ farm:'Farm', jungle:'Jungle', sea:'Sea', pets:'Pets' })[id] || id; }
+function sevlingsProgressLine(){
+  const remaining = Math.max(0, (game.streakGoal||4) - (game.perfectStreak||0));
+  const cooldownMs = (game.cooldownDays||14) * 24*60*60*1000;
+  const daysLeft = game.lastSevlingAt ? Math.max(0, Math.ceil((cooldownMs - (Date.now()-game.lastSevlingAt)) / 86400000)) : 0;
+  if(remaining<=0 && daysLeft<=0) return 'Get every word right on your next practice to win a new Sevling!';
+  const parts = [];
+  if(remaining>0) parts.push(`${remaining} more perfect test${remaining===1?'':'s'}`);
+  if(daysLeft>0) parts.push(`${daysLeft} more day${daysLeft===1?'':'s'}`);
+  return `${parts.join(' and ')} until your next Sevling.`;
+}
+function sevlingProgressHtml(p){
+  if(p.newSevling){
+    const s = p.newSevling;
+    return `<div class="card reward-card" style="border-top-color:var(--gold);">
+      <div class="reward-icon sevling-icon">${sevlingSvg(s, COLLECTION_COLORS[s.collection])}</div>
+      <div class="reward-name">You won ${escapeHtml(s.name)}!</div>
+      <p class="muted" style="margin:0.2rem 0 0 0;">New in your ${collectionLabel(s.collection)} Sevlings collection</p>
+    </div>`;
+  }
+  return `<div class="card"><p class="muted" style="text-align:center;margin:0;">${sevlingsProgressLine()}</p></div>`;
 }
 function rewardBlockHtml(p){
   if(!p.reward) return `<div class="card"><p class="muted" style="text-align:center;margin:0;">No reward this time, get 4 or fewer wrong next time to win one.</p></div>`;
@@ -869,8 +964,7 @@ function rewardBlockHtml(p){
     const names = { gold:'Gold coin', silver:'Silver coin', bronze:'Bronze coin' };
     inner = `<div class="reward-icon">${icons[r.type]}</div><div class="reward-name">${names[r.type]}</div><div class="reward-value">+\u00A3${r.value}</div>`;
   }
-  return `<div class="card reward-card">${inner}</div>
-    ${p.milestoneHit ? `<div class="card" style="background:rgba(217,191,119,0.14);border-color:var(--gold);border-top-color:var(--gold);"><p style="margin:0;text-align:center;font-weight:700;">New items have unlocked in the shop!</p></div>` : ''}`;
+  return `<div class="card reward-card">${inner}</div>`;
 }
 function renderResults(){
   const p = state.practice;
@@ -887,97 +981,102 @@ function renderResults(){
       <p class="muted" style="text-align:center;">${message}</p>
     </div>
     ${p.isRetry ? '' : rewardBlockHtml(p)}
+    ${p.isRetry ? '' : sevlingProgressHtml(p)}
     ${p.wrong.length ? `
       <h3 class="section-title">Words to look at again</h3>
       <div class="card">${p.wrong.map(w=>`<div class="missed-row"><span>${escapeHtml(w.spanish)}</span><span class="muted">${escapeHtml(w.english)}</span></div>`).join('')}</div>
     ` : ''}
     <div class="btn-row" style="margin-top:1rem;">
       ${p.wrong.length ? `<button class="btn-primary" id="btn-retry">Practise the missed words</button>` : ''}
-      ${(!p.isRetry && p.reward) ? `<button class="btn-secondary" id="btn-shop">Go to the shop</button>` : ''}
+      ${!p.isRetry ? `<button class="btn-secondary" id="btn-shop">See your Sevlings</button>` : ''}
       <button class="btn-secondary" id="btn-home">Back to lists</button>
     </div>
   `;
   if(p.wrong.length){
     document.getElementById('btn-retry').onclick = ()=>{
-      state.practice = { mode: p.mode, words: shuffle(p.wrong), index:0, score:0, wrong:[], checked:false, lastCorrect:false, input:'', isRetry:true, reward:null, trophyVariant:null, milestoneHit:false };
+      state.practice = { mode: p.mode, words: shuffle(p.wrong), index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:true, reward:null, trophyVariant:null, newSevling:null };
       state.view='practice'; render();
     };
   }
   const shopBtn = document.getElementById('btn-shop');
-  if(shopBtn) shopBtn.onclick = ()=>{ state.view='shop'; render(); };
+  if(shopBtn) shopBtn.onclick = ()=>{ state.view='sevlings'; render(); };
   document.getElementById('btn-home').onclick = ()=>{ state.view='home'; render(); };
 }
 
-function shopItemCard(item){
-  const locked = game.totalEarned < item.unlockAt;
-  const owned = game.inventory.includes(item.id);
-  const worn = item.category==='outfit' && game.equippedOutfit===item.id;
-  const icon = item.id==='lavalamp' ? lavaLampHtml() : `<div class="item-emoji">${item.emoji}</div>`;
-  let action = '';
-  if(locked) action = `<div class="item-locked">\uD83D\uDD12 Unlocks at \u00A3${item.unlockAt}</div>`;
-  else if(owned) action = item.category==='outfit'
-    ? `<button class="btn-secondary item-btn" data-wear="${item.id}">${worn ? 'Worn' : 'Wear'}</button>`
-    : `<div class="item-owned">In your room</div>`;
-  else action = `<button class="btn-primary item-btn" data-buy="${item.id}" ${game.balance<item.price?'disabled':''}>Buy \u00A3${item.price}</button>`;
-  return `<div class="shop-item ${locked?'locked':''}">${icon}<div class="item-name">${escapeHtml(item.name)}</div>${action}</div>`;
+function sevlingTile(s){
+  const unlocked = game.unlockedSevlings.includes(s.id);
+  const care = game.sevlingCare[s.id];
+  const worn = unlocked && care && care.accessories && care.accessories.length
+    ? care.accessories.map(id=>{ const a=ACCESSORY_ITEMS.find(x=>x.id===id); return a?a.emoji:''; }).join('')
+    : '';
+  const icon = sevlingSvg(s, unlocked ? COLLECTION_COLORS[s.collection] : SEVLING_LOCKED_COLOR);
+  return `<div class="shop-item ${unlocked?'':'locked'}" ${unlocked?`data-sevling="${s.id}"`:''}>
+    <div class="item-emoji sevling-icon">${icon}</div>
+    ${worn ? `<div class="sevling-worn-badges">${worn}</div>` : ''}
+    <div class="item-name">${unlocked ? escapeHtml(s.name) : '???'}</div>
+  </div>`;
 }
-function renderShop(){
-  const cat = state.shopTab || 'pet';
-  const categories = [['pet','Pets'],['outfit','Outfits'],['decor','Room decor']];
+function renderSevlings(){
+  const unlockedCount = game.unlockedSevlings.length;
   app.innerHTML = `
-    ${navRow('shop')}
-    <h2 class="section-title">Shop</h2>
-    <p class="muted">Spend your coins on pets, outfits and room decorations.</p>
-    <div class="btn-row" style="margin-bottom:1rem;">
-      ${categories.map(([id,label])=>`<button class="btn-secondary ${cat===id?'tab-active':''}" data-cat="${id}">${label}</button>`).join('')}
-    </div>
-    <div class="shop-grid">${SHOP_ITEMS.filter(it=>it.category===cat).map(shopItemCard).join('')}</div>
+    ${navRow('sevlings')}
+    <h2 class="section-title">Sevlings</h2>
+    <p class="muted">You've found ${unlockedCount} of ${SEVLINGS.length} Sevlings. Win a new one for every ${game.streakGoal||4} fully correct practices, roughly every few weeks.</p>
+    <div class="card"><p class="muted" style="text-align:center;margin:0;">${sevlingsProgressLine()}</p></div>
+    ${COLLECTIONS.map(([id,label])=>`
+      <h3 class="section-title" style="margin-top:1.2rem;">${label}</h3>
+      <div class="shop-grid">${SEVLINGS.filter(s=>s.collection===id).map(sevlingTile).join('')}</div>
+    `).join('')}
   `;
-  document.querySelectorAll('[data-cat]').forEach(b=>{ b.onclick = ()=>{ state.shopTab = b.dataset.cat; render(); }; });
-  document.querySelectorAll('[data-buy]').forEach(b=>{
+  document.querySelectorAll('[data-sevling]').forEach(el=>{
+    el.onclick = ()=>{ state.currentSevlingId = el.dataset.sevling; state.view='sevling-care'; render(); };
+  });
+}
+function foodTile(f){
+  return `<div class="shop-item"><div class="item-emoji">${f.emoji}</div><div class="item-name">${escapeHtml(f.name)}</div><button class="btn-primary item-btn" data-feed="${f.id}" ${game.balance<f.price?'disabled':''}>Buy \u00A3${f.price}</button></div>`;
+}
+function accessoryTile(a, care){
+  const owned = care.accessories && care.accessories.includes(a.id);
+  const action = owned ? `<div class="item-owned">Worn</div>` : `<button class="btn-primary item-btn" data-accessory="${a.id}" ${game.balance<a.price?'disabled':''}>Buy \u00A3${a.price}</button>`;
+  return `<div class="shop-item"><div class="item-emoji">${a.emoji}</div><div class="item-name">${escapeHtml(a.name)}</div>${action}</div>`;
+}
+function renderSevlingCare(){
+  const s = SEVLINGS.find(x=>x.id===state.currentSevlingId);
+  if(!s || !game.unlockedSevlings.includes(s.id)){ state.view='sevlings'; render(); return; }
+  const care = game.sevlingCare[s.id] || (game.sevlingCare[s.id] = { happiness:50, accessories:[] });
+  const wornEmoji = care.accessories.map(id=>{ const a=ACCESSORY_ITEMS.find(x=>x.id===id); return a?a.emoji:''; }).join('');
+  app.innerHTML = `
+    <button class="btn-ghost" id="btn-back-sevlings">\u2190 Back to Sevlings</button>
+    <div class="card" style="text-align:center;">
+      <div class="reward-icon sevling-icon">${sevlingSvg(s, COLLECTION_COLORS[s.collection])}</div>
+      ${wornEmoji ? `<div class="sevling-worn-badges" style="margin-top:0.4rem;">${wornEmoji}</div>` : ''}
+      <h2 class="section-title" style="text-align:center;">${escapeHtml(s.name)}</h2>
+      <p class="muted" style="margin-top:-0.3rem;">${collectionLabel(s.collection)} collection</p>
+      <p class="progress" style="text-align:center;">Happiness: ${care.happiness}%</p>
+    </div>
+    <h3 class="section-title">Feed ${escapeHtml(s.name)}</h3>
+    <div class="shop-grid">${FOOD_ITEMS.map(foodTile).join('')}</div>
+    <h3 class="section-title" style="margin-top:1.2rem;">Accessories</h3>
+    <div class="shop-grid">${ACCESSORY_ITEMS.map(a=>accessoryTile(a, care)).join('')}</div>
+  `;
+  document.getElementById('btn-back-sevlings').onclick = ()=>{ state.view='sevlings'; render(); };
+  document.querySelectorAll('[data-feed]').forEach(b=>{
     b.onclick = async ()=>{
-      const item = SHOP_ITEMS.find(i=>i.id===b.dataset.buy);
-      if(!item || game.balance<item.price) return;
-      game.balance -= item.price; game.inventory.push(item.id);
-      if(item.category==='outfit' && !game.equippedOutfit) game.equippedOutfit = item.id;
+      const f = FOOD_ITEMS.find(x=>x.id===b.dataset.feed);
+      if(!f || game.balance<f.price) return;
+      game.balance -= f.price;
+      care.happiness = Math.min(100, care.happiness + f.happiness);
       await saveGame(); render();
     };
   });
-  document.querySelectorAll('[data-wear]').forEach(b=>{
+  document.querySelectorAll('[data-accessory]').forEach(b=>{
     b.onclick = async ()=>{
-      game.equippedOutfit = game.equippedOutfit===b.dataset.wear ? null : b.dataset.wear;
+      const a = ACCESSORY_ITEMS.find(x=>x.id===b.dataset.accessory);
+      if(!a || game.balance<a.price || care.accessories.includes(a.id)) return;
+      game.balance -= a.price; care.accessories.push(a.id); care.happiness = Math.min(100, care.happiness+5);
       await saveGame(); render();
     };
   });
-}
-
-function roomTile(item){
-  const icon = item.id==='lavalamp' ? lavaLampHtml() : `<div class="item-emoji">${item.emoji}</div>`;
-  return `<div class="room-tile">${icon}<div class="item-name">${escapeHtml(item.name)}</div></div>`;
-}
-function renderRoom(){
-  const pets = SHOP_ITEMS.filter(i=>i.category==='pet' && game.inventory.includes(i.id));
-  const decor = SHOP_ITEMS.filter(i=>i.category==='decor' && game.inventory.includes(i.id));
-  const outfit = SHOP_ITEMS.find(i=>i.id===game.equippedOutfit);
-  app.innerHTML = `
-    ${navRow('room')}
-    <h2 class="section-title">My room</h2>
-    <div class="card">
-      <h3 style="margin-top:0;">Trophy case</h3>
-      <div class="trophy-case">
-        <div>\uD83C\uDFC6<span>${game.medals.trophy}</span></div>
-        <div>\uD83E\uDD47<span>${game.medals.gold}</span></div>
-        <div>\uD83E\uDD48<span>${game.medals.silver}</span></div>
-        <div>\uD83E\uDD49<span>${game.medals.bronze}</span></div>
-      </div>
-    </div>
-    <div class="avatar-block">
-      <div class="avatar">\uD83E\uDDD1</div>
-      ${outfit ? `<div class="avatar-outfit">${outfit.emoji} ${escapeHtml(outfit.name)}</div>` : `<div class="avatar-outfit muted">No outfit worn</div>`}
-    </div>
-    ${(pets.length||decor.length) ? `<div class="room-grid">${pets.map(roomTile).join('')}${decor.map(roomTile).join('')}</div>`
-      : `<p class="muted">Nothing here yet, visit the shop to decorate your room.</p>`}
-  `;
 }
 
 function renderSettings(){
