@@ -948,7 +948,7 @@ function randomTrophyVariant(){
 async function nextWord(){
   const p = state.practice;
   if(p.index+1 < p.words.length){
-    p.index++; p.checked = false; p.lastCorrect = false; p.accentMissing = false; p.input = ''; render(); return;
+    p.index++; p.checked = false; p.lastCorrect = false; p.accentMissing = false; p.input = ''; p.spanishHidden = false; render(); return;
   }
   if(!p.isRetry){
     const reward = computeReward(p.wrong.length);
