@@ -90,8 +90,10 @@
   .feedback.ok{color:var(--correct);} .feedback.no{color:var(--wrong);}
   .feedback.ok.accent-note{color:var(--accent-warn);}
   .feedback .answer{display:flex;align-items:center;justify-content:center;gap:0.4rem;font-weight:600;font-size:1rem;color:var(--ink-soft);margin-top:0.4rem;}
-  .feedback.ok.accent-note .answer{color:var(--accent-warn);}
-  .accent-letter{color:var(--pink);font-weight:800;background:rgba(255,62,165,0.14);border-radius:4px;padding:0 2px;}
+  .answer-note{font-weight:600;font-size:1rem;color:var(--accent-warn);margin-top:0.5rem;}
+  .answer-word{text-align:center;font-weight:700;font-size:1.3rem;color:var(--accent-warn);margin-top:0.3rem;}
+  .answer-word .speak-btn{vertical-align:middle;margin-left:0.4rem;}
+  .accent-letter{color:var(--blue);}
   .score-big{font-size:2.6rem;font-family:'Baloo 2',sans-serif;text-align:center;color:var(--blue);margin:0.4rem 0;}
   .missed-row{display:flex;justify-content:space-between;padding:0.5rem 0;border-bottom:1px solid rgba(34,26,61,0.14);font-size:0.95rem;}
   .reward-card{text-align:center;}
@@ -242,12 +244,42 @@ function normaliseBase(s){ return (s||'').trim().toLowerCase().replace(/[.,!?Â¿Â
 function stripAccents(s){ return (s||'').normalize('NFD').replace(/\u0301/g,'').normalize('NFC'); }
 function shuffle(arr){ const a=arr.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
 function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function speak(text, lang){
+let cachedVoices = [];
+function loadVoices(){
+  return new Promise((resolve)=>{
+    const existing = window.speechSynthesis.getVoices();
+    if(existing && existing.length){ cachedVoices = existing; resolve(cachedVoices); return; }
+    let resolved = false;
+    const done = ()=>{
+      if(resolved) return;
+      resolved = true;
+      cachedVoices = window.speechSynthesis.getVoices() || [];
+      resolve(cachedVoices);
+    };
+    window.speechSynthesis.onvoiceschanged = done;
+    setTimeout(done, 400);
+  });
+}
+function pickVoice(voices, lang){
+  if(!voices || !voices.length) return null;
+  const wanted = (lang||'').toLowerCase();
+  const prefix = wanted.split('-')[0];
+  const exact = voices.filter(v=>v.lang && v.lang.toLowerCase()===wanted);
+  const partial = voices.filter(v=>v.lang && v.lang.toLowerCase().startsWith(prefix+'-'));
+  const pool = exact.length ? exact : partial;
+  if(!pool.length) return null;
+  const local = pool.find(v=>v.localService);
+  return local || pool[0];
+}
+async function speak(text, lang){
   try{
     if(!('speechSynthesis' in window) || !text) return;
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = lang;
+    const voices = cachedVoices.length ? cachedVoices : await loadVoices();
+    const voice = pickVoice(voices, lang);
+    if(voice) u.voice = voice;
     window.speechSynthesis.speak(u);
   }catch(e){}
 }
@@ -484,6 +516,7 @@ function cleanExtractedWord(s){
 
 // ---------- init ----------
 async function init(){
+  if('speechSynthesis' in window) loadVoices();
   settings = loadSettings();
   const config = settings.firebaseConfig || DEFAULT_FIREBASE_CONFIG;
   if(config){
@@ -918,7 +951,7 @@ function accentSpanHtml(word){
 }
 function feedbackHtml(p, word){
   if(p.lastCorrect){
-    if(p.accentMissing) return `<div class="feedback ok accent-note">Correct!<span class="answer">Don't forget the accent next time: ${accentSpanHtml(word.spanish)} ${speakBtn(word.spanish,'es-ES')}</span></div>`;
+    if(p.accentMissing) return `<div class="feedback ok accent-note">Correct!<div class="answer-note">Don't forget the accent next time</div><div class="answer-word">${accentSpanHtml(word.spanish)} ${speakBtn(word.spanish,'es-ES')}</div></div>`;
     return `<div class="feedback ok">Correct!</div>`;
   }
   return `<div class="feedback no">Not quite<span class="answer">Correct spelling: ${escapeHtml(word.spanish)} ${speakBtn(word.spanish,'es-ES')}</span></div>`;
