@@ -277,20 +277,33 @@ function pickVoice(voices, lang){
   const local = pool.find(v=>v.localService);
   return local || pool[0];
 }
-async function speak(text, lang){
+async function speakSequence(items){
+  const validItems = (items||[]).filter(it => it && it.text);
+  if(!('speechSynthesis' in window) || !validItems.length) return;
   try{
-    if(!('speechSynthesis' in window) || !text) return;
     window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = lang;
     const voices = cachedVoices.length ? cachedVoices : await loadVoices();
-    const voice = pickVoice(voices, lang);
-    if(voice) u.voice = voice;
-    window.speechSynthesis.speak(u);
+    await new Promise((resolve)=>{
+      let settled = false;
+      const finish = ()=>{ if(settled) return; settled = true; resolve(); };
+      validItems.forEach((item, i)=>{
+        const u = new SpeechSynthesisUtterance(item.text);
+        u.lang = item.lang;
+        const voice = pickVoice(voices, item.lang);
+        if(voice) u.voice = voice;
+        if(i === validItems.length - 1){ u.onend = finish; u.onerror = finish; }
+        window.speechSynthesis.speak(u);
+      });
+      setTimeout(finish, 6000);
+    });
   }catch(e){}
 }
-function speakBtn(text, lang){
-  return `<button type="button" class="speak-btn" data-text="${escapeHtml(text)}" data-lang="${lang}" aria-label="Listen">\uD83D\uDD0A</button>`;
+async function speak(text, lang){
+  await speakSequence([{ text, lang }]);
+}
+function speakBtn(text, lang, speakFirst){
+  const preAttrs = speakFirst && speakFirst.text ? ` data-pretext="${escapeHtml(speakFirst.text)}" data-prelang="${speakFirst.lang}"` : '';
+  return `<button type="button" class="speak-btn" data-text="${escapeHtml(text)}" data-lang="${lang}"${preAttrs} aria-label="Listen">\uD83D\uDD0A</button>`;
 }
 function friendlyAuthError(e){
   const code = e && e.code ? e.code : '';
@@ -540,11 +553,18 @@ function refreshBadge(){
   const el = document.getElementById('balance-badge');
   const totalMedals = game.medals.trophy + game.medals.gold + game.medals.silver + game.medals.bronze;
   el.innerHTML = `<span>\uD83C\uDFC5 ${totalMedals}</span><span>\u00A3${game.balance}</span>`;
-  el.onclick = ()=>{ if(authUser) state.view = 'sevlings'; render(); };
+  el.onclick = ()=>{ if(authUser) state.view = 'trophies'; render(); };
 }
 function wireSpeakButtons(){
   document.querySelectorAll('.speak-btn').forEach(b=>{
-    b.onclick = (e)=>{ e.preventDefault(); speak(b.dataset.text, b.dataset.lang); };
+    b.onclick = (e)=>{
+      e.preventDefault();
+      if(b.dataset.pretext){
+        speakSequence([{ text:b.dataset.pretext, lang:b.dataset.prelang }, { text:b.dataset.text, lang:b.dataset.lang }]);
+      }else{
+        speak(b.dataset.text, b.dataset.lang);
+      }
+    };
   });
 }
 function wireNav(){
@@ -572,6 +592,7 @@ function render(){
   else if(state.view==='results') renderResults();
   else if(state.view==='sevlings') renderSevlings();
   else if(state.view==='sevling-care') renderSevlingCare();
+  else if(state.view==='trophies') renderTrophies();
   else if(state.view==='settings') renderSettings();
   wireSpeakButtons(); wireNav(); refreshBadge();
 }
@@ -896,7 +917,7 @@ async function startPractice(mode){
   if(!db || !authUser){ state.error = 'Sign in first.'; state.view='login'; render(); return; }
   const words = await getListWords(state.currentListId);
   if(!words.length){ state.error = "That list seems to be empty."; state.view='home'; render(); return; }
-  state.practice = { mode, words: shuffle(words), index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:false, reward:null, trophyVariant:null, newSevling:null, spanishHidden:false };
+  state.practice = { mode, words: shuffle(words), index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:false, reward:null, trophyVariant:null, newSevling:null, spanishHidden:false, spanishRevealed:false };
   state.error=''; state.view = 'practice'; render();
 }
 
@@ -909,13 +930,14 @@ function renderPractice(){
   const isCopy = p.mode === 'copy';
   const shownWord = isCopy ? word.spanish : word.english;
   const shownLang = isCopy ? 'es-ES' : 'en-GB';
-  const hideSpanish = isCopy && p.spanishHidden;
+  const speakFirst = isCopy ? { text: word.english, lang: 'en-GB' } : null;
+  const spanishVisible = !isCopy || (p.spanishRevealed && !p.spanishHidden);
   app.innerHTML = `
     <div class="progress">Word ${p.index+1} of ${p.words.length} &nbsp;\u00B7&nbsp; Score ${p.score}</div>
     <div class="card">
       <div class="word-row">
-        <div class="practice-word${hideSpanish ? ' word-faded' : ''}" id="practice-shown-word">${hideSpanish ? '' : escapeHtml(shownWord)}</div>
-        ${speakBtn(shownWord, shownLang)}
+        <div class="practice-word${spanishVisible ? '' : ' word-faded'}" id="practice-shown-word">${spanishVisible ? escapeHtml(shownWord) : ''}</div>
+        ${speakBtn(shownWord, shownLang, speakFirst)}
       </div>
       ${isCopy ? `<div class="practice-translation">${escapeHtml(word.english)}</div>` : ''}
       <input type="text" id="answer-input" autocomplete="off" autocapitalize="off" spellcheck="false"
@@ -935,21 +957,27 @@ function renderPractice(){
   input.onkeydown = (e)=>{ if(e.key==='Enter'){ e.preventDefault(); if(p.checked) nextWord(); else checkAnswer(word); } };
   if(!p.checked){ document.getElementById('btn-check').onclick = ()=>checkAnswer(word); }
   else{ document.getElementById('btn-next').onclick = ()=>nextWord(); }
-  document.getElementById('btn-quit').onclick = ()=>{ if(confirm('Stop this practice session?')){ clearCopyRevealTimer(); state.view='home'; render(); } };
+  document.getElementById('btn-quit').onclick = ()=>{ if(confirm('Stop this practice session?')){ clearCopyRevealTimer(); if('speechSynthesis' in window) window.speechSynthesis.cancel(); state.view='home'; render(); } };
   clearCopyRevealTimer();
-  if(isCopy && !p.checked && !p.spanishHidden){
-    copyRevealTimer = setTimeout(()=>{
-      copyRevealTimer = null;
+  if(isCopy && !p.checked && !p.spanishRevealed && !p.spanishHidden){
+    speakSequence([speakFirst, { text: shownWord, lang: shownLang }]).then(()=>{
+      if(!(state.practice===p && !p.checked && !p.spanishRevealed)) return;
+      p.spanishRevealed = true;
       const el = document.getElementById('practice-shown-word');
-      if(el) el.classList.add('word-faded');
-      setTimeout(()=>{
-        if(state.practice===p && !p.checked){
-          p.spanishHidden = true;
-          const el2 = document.getElementById('practice-shown-word');
-          if(el2) el2.textContent = '';
-        }
-      }, 450);
-    }, 5000);
+      if(el){ el.textContent = shownWord; el.classList.remove('word-faded'); }
+      copyRevealTimer = setTimeout(()=>{
+        copyRevealTimer = null;
+        const el2 = document.getElementById('practice-shown-word');
+        if(el2) el2.classList.add('word-faded');
+        setTimeout(()=>{
+          if(state.practice===p && !p.checked){
+            p.spanishHidden = true;
+            const el3 = document.getElementById('practice-shown-word');
+            if(el3) el3.textContent = '';
+          }
+        }, 450);
+      }, 5000);
+    });
   }
 }
 function accentSpanHtml(word){
@@ -987,7 +1015,7 @@ function randomTrophyVariant(){
 async function nextWord(){
   const p = state.practice;
   if(p.index+1 < p.words.length){
-    p.index++; p.checked = false; p.lastCorrect = false; p.accentMissing = false; p.input = ''; p.spanishHidden = false; render(); return;
+    p.index++; p.checked = false; p.lastCorrect = false; p.accentMissing = false; p.input = ''; p.spanishHidden = false; p.spanishRevealed = false; render(); return;
   }
   if(!p.isRetry){
     const reward = computeReward(p.wrong.length);
@@ -1085,7 +1113,7 @@ function renderResults(){
   `;
   if(p.wrong.length){
     document.getElementById('btn-retry').onclick = ()=>{
-      state.practice = { mode: p.mode, words: shuffle(p.wrong), index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:true, reward:null, trophyVariant:null, newSevling:null, spanishHidden:false };
+      state.practice = { mode: p.mode, words: shuffle(p.wrong), index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:true, reward:null, trophyVariant:null, newSevling:null, spanishHidden:false, spanishRevealed:false };
       state.view='practice'; render();
     };
   }
@@ -1106,6 +1134,35 @@ function sevlingTile(s){
     ${worn ? `<div class="sevling-worn-badges">${worn}</div>` : ''}
     <div class="item-name">${unlocked ? escapeHtml(s.name) : '???'}</div>
   </div>`;
+}
+function trophyTile(emoji, label, count){
+  return `<div class="shop-item"><div class="item-emoji" style="font-size:2.6rem;">${emoji}</div><div class="item-name">${label}</div><div class="reward-value" style="font-size:1.5rem;">${count}</div></div>`;
+}
+function renderTrophies(){
+  const m = game.medals;
+  const totalMedals = m.trophy + m.gold + m.silver + m.bronze;
+  app.innerHTML = `
+    <button class="btn-ghost" id="btn-back-trophies">\u2190 Back</button>
+    <div class="masthead" style="text-align:center;">
+      <h1>Trophy Case</h1>
+      <p>Every medal and coin you've earned from practising.</p>
+    </div>
+    <div class="card" style="text-align:center;">
+      <div class="score-big">\u00A3${game.balance}</div>
+      <p class="muted" style="margin:0;">Coins ready to spend on your Sevlings</p>
+    </div>
+    <div class="shop-grid">
+      ${trophyTile('\uD83C\uDFC6', 'Trophies', m.trophy)}
+      ${trophyTile('\uD83E\uDD47', 'Gold coins', m.gold)}
+      ${trophyTile('\uD83E\uDD48', 'Silver coins', m.silver)}
+      ${trophyTile('\uD83E\uDD49', 'Bronze coins', m.bronze)}
+    </div>
+    <div class="card reward-card" style="margin-top:1rem;">
+      <p style="margin:0;font-weight:700;font-size:1.05rem;">${totalMedals} medal${totalMedals===1?'':'s'} earned in total</p>
+      <p class="muted" style="margin:0.2rem 0 0 0;">\u00A3${game.totalEarned} earned altogether since you started</p>
+    </div>
+  `;
+  document.getElementById('btn-back-trophies').onclick = ()=>{ state.view='home'; render(); };
 }
 function renderSevlings(){
   const unlockedCount = game.unlockedSevlings.length;
