@@ -79,6 +79,7 @@
   .list-chip .meta{font-size:0.85rem;color:var(--ink-soft);}
   .list-chip .del{background:none;border:none;box-shadow:none;color:var(--wrong);font-size:0.85rem;text-decoration:underline;min-height:auto;padding:0.2rem;}
   input[type=text], input[type=password], input[type=email]{ font-family:'Inter',sans-serif; font-size:1.1rem; padding:0.75rem 0.9rem; border-radius:12px; border:2px solid var(--ink); width:100%; margin-bottom:0.7rem; background:#fff; color:#000; }
+  select{ font-family:'Inter',sans-serif; font-size:1rem; padding:0.7rem 0.8rem; border-radius:12px; border:2px solid var(--ink); width:100%; margin-bottom:0.7rem; background:#fff; color:#000; }
   textarea.settings-area{ width:100%; font-family:monospace; font-size:0.82rem; padding:0.6rem; border-radius:12px; border:2px solid var(--ink); resize:vertical; background:#fff; color:#000; }
   table.review{width:100%;border-collapse:collapse;margin-bottom:1rem;}
   table.review th{text-align:left;font-size:0.8rem;color:var(--ink-soft);padding-bottom:0.3rem;}
@@ -140,7 +141,8 @@
   .sevling-icon{ display:flex; align-items:center; justify-content:center; }
   .item-emoji.sevling-icon{ width:2.6rem; height:2.6rem; margin:0 auto 0.3rem auto; }
   .reward-icon.sevling-icon{ width:4rem; height:4rem; margin:0.2rem auto; }
-  .sevling-icon svg{ width:100%; height:100%; display:block; }
+  .sevling-icon svg, .sevling-icon img{ width:100%; height:100%; display:block; object-fit:contain; }
+  .sevling-locked-img{ filter:brightness(0); }
   .sevling-worn-badges{ font-size:0.95rem; margin-bottom:0.2rem; }
   @media (prefers-reduced-motion: reduce){ .spinner{animation:none;} .blob{animation:none;top:20px;} }
 </style>
@@ -183,7 +185,7 @@ const SEVLINGS = [
   { id:'wally', name:'Wally', collection:'sea', features:'<path d="M45,105 Q60,128 75,105 Q60,116 45,105 Z"/><path d="M68,15 L76,2 L84,17 Z"/>' },
   { id:'lotyl', name:'Lotyl', collection:'sea', features:'<path d="M22,30 Q8,25 12,38 Q20,35 22,30 Z"/><path d="M20,42 Q4,40 10,52 Q18,48 20,42 Z"/><path d="M24,54 Q8,55 16,66 Q22,60 24,54 Z"/><path d="M98,30 Q112,25 108,38 Q100,35 98,30 Z"/><path d="M100,42 Q116,40 110,52 Q102,48 100,42 Z"/><path d="M96,54 Q112,55 104,66 Q98,60 96,54 Z"/>' },
   { id:'pearl', name:'Pearl', collection:'sea', features:'<ellipse cx="60" cy="50" rx="46" ry="28"/>' },
-  { id:'puggle', name:'Puggle', collection:'pets', features:'<ellipse cx="20" cy="38" rx="11" ry="18" transform="rotate(-10 20 38)"/><ellipse cx="100" cy="38" rx="11" ry="18" transform="rotate(10 100 38)"/><ellipse cx="60" cy="72" rx="15" ry="10"/>' },
+  { id:'puggle', name:'Puggle', collection:'pets', image:'puggle.png', imageBlink:'puggle-blink.png', imageHappy:'puggle-happy.png', features:'<ellipse cx="20" cy="38" rx="11" ry="18" transform="rotate(-10 20 38)"/><ellipse cx="100" cy="38" rx="11" ry="18" transform="rotate(10 100 38)"/><ellipse cx="60" cy="72" rx="15" ry="10"/>' },
   { id:'hopper', name:'Hopper', collection:'pets', features:'<ellipse cx="44" cy="-15" rx="8" ry="32"/><ellipse cx="76" cy="-15" rx="8" ry="32"/>' },
   { id:'puff', name:'Puff', collection:'pets', features:'<path d="M32,22 L28,4 L46,16 Z"/><path d="M88,22 L92,4 L74,16 Z"/>' },
   { id:'tabby', name:'Tabby', collection:'pets', features:'<path d="M34,20 L31,2 L48,15 Z"/><path d="M86,20 L89,2 L72,15 Z"/><path d="M96,85 Q114,90 108,72 Z"/>' },
@@ -200,6 +202,48 @@ const SEVLING_LOCKED_COLOR = '#3A4C63';
 function sevlingSvg(s, color){
   const body = s.noBody ? '' : `<path d="${SEVLING_BODY}"/>`;
   return `<svg viewBox="-50 -60 220 220" fill="${color}">${body}${s.features||''}</svg>`;
+}
+function sevlingIcon(s, locked){
+  if(s.image){
+    const canAnimate = !locked && s.imageBlink && s.imageHappy;
+    return `<img src="${s.image}" alt="${escapeHtml(s.name)}"${locked ? ' class="sevling-locked-img"' : ''}${canAnimate ? ` data-sevling-anim="${s.id}"` : ''}>`;
+  }
+  return sevlingSvg(s, locked ? SEVLING_LOCKED_COLOR : COLLECTION_COLORS[s.collection]);
+}
+// ---------- Sevling idle animation (blink/happy cycling on unlocked artwork) ----------
+// Frame sequence per Harry's spec: resting, blink, resting, happy, resting, happy, blink, resting, then loops.
+const SEVLING_ANIM_SEQUENCE = ['resting','blink','resting','happy','resting','happy','blink','resting'];
+const SEVLING_ANIM_DURATIONS = { resting:2500, blink:180, happy:1400 };
+let sevlingAnimTimers = [];
+function stopSevlingAnimations(){
+  sevlingAnimTimers.forEach(id=>clearTimeout(id));
+  sevlingAnimTimers = [];
+}
+function sevlingFrameSrc(s, frame){
+  if(frame==='blink') return s.imageBlink;
+  if(frame==='happy') return s.imageHappy;
+  return s.image;
+}
+function startSevlingAnimation(img, s){
+  let step = 0;
+  function tick(){
+    if(!document.body.contains(img)) return; // element was replaced by a re-render, stop quietly
+    const frame = SEVLING_ANIM_SEQUENCE[step % SEVLING_ANIM_SEQUENCE.length];
+    img.src = sevlingFrameSrc(s, frame);
+    step++;
+    const nextFrame = SEVLING_ANIM_SEQUENCE[step % SEVLING_ANIM_SEQUENCE.length];
+    const id = setTimeout(tick, SEVLING_ANIM_DURATIONS[nextFrame] || 2500);
+    sevlingAnimTimers.push(id);
+  }
+  // small random stagger so multiple visible Sevlings don't blink in perfect unison
+  const startId = setTimeout(tick, Math.floor(Math.random()*1000));
+  sevlingAnimTimers.push(startId);
+}
+function wireSevlingAnimations(){
+  document.querySelectorAll('img[data-sevling-anim]').forEach(img=>{
+    const s = SEVLINGS.find(x=>x.id===img.dataset.sevlingAnim);
+    if(s) startSevlingAnimation(img, s);
+  });
 }
 const FOOD_ITEMS = [
   { id:'carrot', name:'Carrot', emoji:'\u{1F955}', price:1, happiness:8 },
@@ -277,6 +321,15 @@ function pickVoice(voices, lang){
   const local = pool.find(v=>v.localService);
   return local || pool[0];
 }
+function resolveVoice(voices, lang){
+  const prefix = (lang||'').toLowerCase().split('-')[0];
+  const pref = settings.voicePrefs && settings.voicePrefs[prefix];
+  if(pref){
+    const match = voices.find(v=>v.name===pref.name && v.lang===pref.lang);
+    if(match) return match;
+  }
+  return pickVoice(voices, lang);
+}
 async function speakSequence(items){
   const validItems = (items||[]).filter(it => it && it.text);
   if(!('speechSynthesis' in window) || !validItems.length) return;
@@ -289,7 +342,8 @@ async function speakSequence(items){
       validItems.forEach((item, i)=>{
         const u = new SpeechSynthesisUtterance(item.text);
         u.lang = item.lang;
-        const voice = pickVoice(voices, item.lang);
+        u.rate = 0.9;
+        const voice = resolveVoice(voices, item.lang);
         if(voice) u.voice = voice;
         if(i === validItems.length - 1){ u.onend = finish; u.onerror = finish; }
         window.speechSynthesis.speak(u);
@@ -356,6 +410,15 @@ async function saveFamilyInviteCode(code){
   try{ await setDoc(doc(db,'family','invite'), { code: code.toUpperCase() }); return true; }
   catch(e){ state.error = `Couldn't save the invite code (${e.message}).`; return false; }
 }
+async function loadVoicePrefs(){
+  try{ const d = await fsGet('data','prefs'); return (d && d.voicePrefs) ? d.voicePrefs : null; }
+  catch(e){ return null; }
+}
+async function saveVoicePrefs(prefs){
+  if(!db || !authUser){ state.error = 'Sign in first to save your voice choice.'; return false; }
+  try{ await fsSet('data','prefs', { voicePrefs: prefs }); return true; }
+  catch(e){ state.error = `Couldn't save your voice choice (${e.message}).`; return false; }
+}
 function parseFirebaseConfigText(text){
   const grab = (key)=>{
     const m = text.match(new RegExp('["\\\']?' + key + '["\\\']?\\s*:\\s*["\\\']([^"\\\']+)["\\\']'));
@@ -382,6 +445,7 @@ async function handleAuthChange(){
     game = await loadGame();
     settings.geminiKey = await loadFamilyGeminiKey();
     settings.inviteCode = await loadFamilyInviteCode();
+    settings.voicePrefs = await loadVoicePrefs();
     state.lists = (await getIndex()).sort((a,b)=>b.savedAt-a.savedAt);
     if(state.lists.length && !state.currentListId) state.currentListId = state.lists[0].id;
     if(state.view==='login') state.view = 'home';
@@ -584,6 +648,7 @@ function lavaLampHtml(){
 }
 
 function render(){
+  stopSevlingAnimations();
   if(state.view==='login') renderLogin();
   else if(state.view==='home') renderHome();
   else if(state.view==='upload') renderUpload();
@@ -594,7 +659,7 @@ function render(){
   else if(state.view==='sevling-care') renderSevlingCare();
   else if(state.view==='trophies') renderTrophies();
   else if(state.view==='settings') renderSettings();
-  wireSpeakButtons(); wireNav(); refreshBadge();
+  wireSpeakButtons(); wireNav(); refreshBadge(); wireSevlingAnimations();
 }
 
 // ---------- login / signup / reset ----------
@@ -912,7 +977,16 @@ function wireReviewRows(){
   document.querySelectorAll('.rm').forEach(el=>{ el.onclick = ()=>{ state.extractedWords.splice(+el.dataset.i,1); render(); }; });
 }
 
+function unlockSpeech(){
+  if(!('speechSynthesis' in window)) return;
+  try{
+    const u = new SpeechSynthesisUtterance(' ');
+    u.volume = 0;
+    window.speechSynthesis.speak(u);
+  }catch(e){}
+}
 async function startPractice(mode){
+  unlockSpeech();
   clearCopyRevealTimer();
   if(!db || !authUser){ state.error = 'Sign in first.'; state.view='login'; render(); return; }
   const words = await getListWords(state.currentListId);
@@ -1064,7 +1138,7 @@ function sevlingProgressHtml(p){
   if(p.newSevling){
     const s = p.newSevling;
     return `<div class="card reward-card" style="border-top-color:var(--gold);">
-      <div class="reward-icon sevling-icon">${sevlingSvg(s, COLLECTION_COLORS[s.collection])}</div>
+      <div class="reward-icon sevling-icon">${sevlingIcon(s, false)}</div>
       <div class="reward-name">You won ${escapeHtml(s.name)}!</div>
       <p class="muted" style="margin:0.2rem 0 0 0;">New in your ${collectionLabel(s.collection)} Sevlings collection</p>
     </div>`;
@@ -1128,7 +1202,7 @@ function sevlingTile(s){
   const worn = unlocked && care && care.accessories && care.accessories.length
     ? care.accessories.map(id=>{ const a=ACCESSORY_ITEMS.find(x=>x.id===id); return a?a.emoji:''; }).join('')
     : '';
-  const icon = sevlingSvg(s, unlocked ? COLLECTION_COLORS[s.collection] : SEVLING_LOCKED_COLOR);
+  const icon = sevlingIcon(s, !unlocked);
   return `<div class="shop-item ${unlocked?'':'locked'}" ${unlocked?`data-sevling="${s.id}"`:''}>
     <div class="item-emoji sevling-icon">${icon}</div>
     ${worn ? `<div class="sevling-worn-badges">${worn}</div>` : ''}
@@ -1196,7 +1270,7 @@ function renderSevlingCare(){
   app.innerHTML = `
     <button class="btn-ghost" id="btn-back-sevlings">\u2190 Back to Sevlings</button>
     <div class="card" style="text-align:center;">
-      <div class="reward-icon sevling-icon">${sevlingSvg(s, COLLECTION_COLORS[s.collection])}</div>
+      <div class="reward-icon sevling-icon">${sevlingIcon(s, false)}</div>
       ${wornEmoji ? `<div class="sevling-worn-badges" style="margin-top:0.4rem;">${wornEmoji}</div>` : ''}
       <h2 class="section-title" style="text-align:center;">${escapeHtml(s.name)}</h2>
       <p class="muted" style="margin-top:-0.3rem;">${collectionLabel(s.collection)} collection</p>
@@ -1227,8 +1301,18 @@ function renderSevlingCare(){
   });
 }
 
+function voiceOptionsHtml(voices, prefix, selectedName){
+  const matches = voices.filter(v=>v.lang && v.lang.toLowerCase().startsWith(prefix));
+  const label = prefix==='es' ? 'Spanish' : 'English';
+  const base = `<option value="">Best available (automatic)</option>`;
+  if(!matches.length) return base + `<option value="" disabled>No ${label} voices found on this device yet</option>`;
+  return base + matches.map(v=>`<option value="${encodeURIComponent(v.name)}|${encodeURIComponent(v.lang)}" ${selectedName===v.name?'selected':''}>${escapeHtml(v.name)} (${escapeHtml(v.lang)})</option>`).join('');
+}
 function renderSettings(){
   const connected = !!db;
+  if(!cachedVoices.length && 'speechSynthesis' in window){
+    loadVoices().then(()=>{ if(state.view==='settings') render(); });
+  }
   app.innerHTML = `
     ${authUser ? navRow('settings') : ''}
     <h2 class="section-title">Settings</h2>
@@ -1240,6 +1324,16 @@ function renderSettings(){
       <p class="muted">Only needed if you want photos read automatically, you can skip this and add words by hand, or add a key later from the photo upload screen. This key is shared with everyone in your family once saved. Sign in at aistudio.google.com, click \u2018Get API key\u2019, create a free key, and paste it here.</p>
       <input type="text" id="gemini-key" placeholder="Family Gemini API key" value="${escapeHtml(settings.geminiKey||'')}" ${authUser ? '' : 'disabled'}>
       ${!authUser ? `<p class="muted" style="margin-top:-0.5rem;">Sign in first to save this, it lives on your family account rather than this device.</p>` : ''}
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;">Voice</h3>
+      <p class="muted">Choose which of this device's installed voices reads Spanish and English aloud. Saved to your own account, so it's just for you, but a device that doesn't have the exact voice you pick will fall back to its best automatic match instead.</p>
+      <label class="muted" style="display:block;margin-bottom:0.2rem;">Spanish voice</label>
+      <select id="voice-es" ${authUser ? '' : 'disabled'}>${voiceOptionsHtml(cachedVoices, 'es', settings.voicePrefs && settings.voicePrefs.es && settings.voicePrefs.es.name)}</select>
+      <label class="muted" style="display:block;margin:0.6rem 0 0.2rem 0;">English voice</label>
+      <select id="voice-en" ${authUser ? '' : 'disabled'}>${voiceOptionsHtml(cachedVoices, 'en', settings.voicePrefs && settings.voicePrefs.en && settings.voicePrefs.en.name)}</select>
+      ${!authUser ? `<p class="muted" style="margin-top:0.5rem;">Sign in first to save this, it lives on your own account rather than this device.</p>` : ''}
     </div>
 
     <div class="card">
@@ -1274,6 +1368,18 @@ function renderSettings(){
       const ok2 = await saveFamilyInviteCode(inviteVal);
       if(ok2) settings.inviteCode = inviteVal.toUpperCase();
       else { render(); return; }
+    }
+    if(authUser){
+      const esVal = document.getElementById('voice-es').value;
+      const enVal = document.getElementById('voice-en').value;
+      const newPrefs = {};
+      if(esVal){ const [name, lang] = esVal.split('|').map(decodeURIComponent); newPrefs.es = { name, lang }; }
+      if(enVal){ const [name, lang] = enVal.split('|').map(decodeURIComponent); newPrefs.en = { name, lang }; }
+      if(JSON.stringify(newPrefs) !== JSON.stringify(settings.voicePrefs || {})){
+        const ok3 = await saveVoicePrefs(newPrefs);
+        if(ok3) settings.voicePrefs = newPrefs;
+        else { render(); return; }
+      }
     }
     if(cfgText){
       const parsed = parseFirebaseConfigText(cfgText);
