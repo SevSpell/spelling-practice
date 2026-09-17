@@ -185,7 +185,7 @@ const SEVLINGS = [
   { id:'wally', name:'Wally', collection:'sea', features:'<path d="M45,105 Q60,128 75,105 Q60,116 45,105 Z"/><path d="M68,15 L76,2 L84,17 Z"/>' },
   { id:'lotyl', name:'Lotyl', collection:'sea', features:'<path d="M22,30 Q8,25 12,38 Q20,35 22,30 Z"/><path d="M20,42 Q4,40 10,52 Q18,48 20,42 Z"/><path d="M24,54 Q8,55 16,66 Q22,60 24,54 Z"/><path d="M98,30 Q112,25 108,38 Q100,35 98,30 Z"/><path d="M100,42 Q116,40 110,52 Q102,48 100,42 Z"/><path d="M96,54 Q112,55 104,66 Q98,60 96,54 Z"/>' },
   { id:'pearl', name:'Pearl', collection:'sea', features:'<ellipse cx="60" cy="50" rx="46" ry="28"/>' },
-  { id:'puggle', name:'Puggle', collection:'pets', image:'puggle.png', imageBlink:'puggle-blink.png', imageHappy:'puggle-happy.png', features:'<ellipse cx="20" cy="38" rx="11" ry="18" transform="rotate(-10 20 38)"/><ellipse cx="100" cy="38" rx="11" ry="18" transform="rotate(10 100 38)"/><ellipse cx="60" cy="72" rx="15" ry="10"/>' },
+  { id:'puggle', name:'Puggle', collection:'pets', image:'puggle.png', features:'<ellipse cx="20" cy="38" rx="11" ry="18" transform="rotate(-10 20 38)"/><ellipse cx="100" cy="38" rx="11" ry="18" transform="rotate(10 100 38)"/><ellipse cx="60" cy="72" rx="15" ry="10"/>' },
   { id:'hopper', name:'Hopper', collection:'pets', features:'<ellipse cx="44" cy="-15" rx="8" ry="32"/><ellipse cx="76" cy="-15" rx="8" ry="32"/>' },
   { id:'puff', name:'Puff', collection:'pets', features:'<path d="M32,22 L28,4 L46,16 Z"/><path d="M88,22 L92,4 L74,16 Z"/>' },
   { id:'tabby', name:'Tabby', collection:'pets', features:'<path d="M34,20 L31,2 L48,15 Z"/><path d="M86,20 L89,2 L72,15 Z"/><path d="M96,85 Q114,90 108,72 Z"/>' },
@@ -205,45 +205,9 @@ function sevlingSvg(s, color){
 }
 function sevlingIcon(s, locked){
   if(s.image){
-    const canAnimate = !locked && s.imageBlink && s.imageHappy;
-    return `<img src="${s.image}" alt="${escapeHtml(s.name)}"${locked ? ' class="sevling-locked-img"' : ''}${canAnimate ? ` data-sevling-anim="${s.id}"` : ''}>`;
+    return `<img src="${s.image}" alt="${escapeHtml(s.name)}"${locked ? ' class="sevling-locked-img"' : ''}>`;
   }
   return sevlingSvg(s, locked ? SEVLING_LOCKED_COLOR : COLLECTION_COLORS[s.collection]);
-}
-// ---------- Sevling idle animation (blink/happy cycling on unlocked artwork) ----------
-// Frame sequence per Harry's spec: resting, blink, resting, happy, resting, happy, blink, resting, then loops.
-const SEVLING_ANIM_SEQUENCE = ['resting','blink','resting','happy','resting','happy','blink','resting'];
-const SEVLING_ANIM_DURATIONS = { resting:2500, blink:180, happy:1400 };
-let sevlingAnimTimers = [];
-function stopSevlingAnimations(){
-  sevlingAnimTimers.forEach(id=>clearTimeout(id));
-  sevlingAnimTimers = [];
-}
-function sevlingFrameSrc(s, frame){
-  if(frame==='blink') return s.imageBlink;
-  if(frame==='happy') return s.imageHappy;
-  return s.image;
-}
-function startSevlingAnimation(img, s){
-  let step = 0;
-  function tick(){
-    if(!document.body.contains(img)) return; // element was replaced by a re-render, stop quietly
-    const frame = SEVLING_ANIM_SEQUENCE[step % SEVLING_ANIM_SEQUENCE.length];
-    img.src = sevlingFrameSrc(s, frame);
-    step++;
-    const nextFrame = SEVLING_ANIM_SEQUENCE[step % SEVLING_ANIM_SEQUENCE.length];
-    const id = setTimeout(tick, SEVLING_ANIM_DURATIONS[nextFrame] || 2500);
-    sevlingAnimTimers.push(id);
-  }
-  // small random stagger so multiple visible Sevlings don't blink in perfect unison
-  const startId = setTimeout(tick, Math.floor(Math.random()*1000));
-  sevlingAnimTimers.push(startId);
-}
-function wireSevlingAnimations(){
-  document.querySelectorAll('img[data-sevling-anim]').forEach(img=>{
-    const s = SEVLINGS.find(x=>x.id===img.dataset.sevlingAnim);
-    if(s) startSevlingAnimation(img, s);
-  });
 }
 const FOOD_ITEMS = [
   { id:'carrot', name:'Carrot', emoji:'\u{1F955}', price:1, happiness:8 },
@@ -264,7 +228,7 @@ const TROPHY_ADJ = ['Sparkling','Shining','Golden','Dazzling','Marvellous','Bril
 const state = {
   view: 'settings', lists: [], currentListId: null,
   uploadImageB64: null, uploadImagePreview: null, extractedWords: [], listLabelDraft: '',
-  busy: false, error: '', settingsMessage: '', firebaseConfigDraft: '', currentSevlingId: null, authMode: 'signin',
+  busy: false, error: '', settingsMessage: '', firebaseConfigDraft: '', currentSevlingId: null, authMode: 'signin', practiceLang: 'es',
   practice: { mode:null, words:[], index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:false, reward:null, trophyVariant:null, newSevling:null }
 };
 
@@ -648,7 +612,6 @@ function lavaLampHtml(){
 }
 
 function render(){
-  stopSevlingAnimations();
   if(state.view==='login') renderLogin();
   else if(state.view==='home') renderHome();
   else if(state.view==='upload') renderUpload();
@@ -659,7 +622,7 @@ function render(){
   else if(state.view==='sevling-care') renderSevlingCare();
   else if(state.view==='trophies') renderTrophies();
   else if(state.view==='settings') renderSettings();
-  wireSpeakButtons(); wireNav(); refreshBadge(); wireSevlingAnimations();
+  wireSpeakButtons(); wireNav(); refreshBadge();
 }
 
 // ---------- login / signup / reset ----------
@@ -805,19 +768,32 @@ function renderHome(){
       `<p class="muted">No lists saved yet, upload one above to get started.</p>`}
 
     <h2 class="section-title" style="margin-top:1.4rem;">Practise</h2>
-    <button class="mode-btn rot-l" id="mode-copy" ${hasLists?'':'disabled'}>
-      <strong>Copy the Spanish</strong>
-      <span>See the Spanish word with the English translation underneath, then type the Spanish word.</span>
-    </button>
-    <button class="mode-btn rot-r" id="mode-translate" ${hasLists?'':'disabled'}>
-      <strong>Translate to Spanish</strong>
-      <span>See only the English word, then type the Spanish translation.</span>
-    </button>
+    <div class="btn-row" style="margin-bottom:0.8rem;">
+      <button class="btn-secondary ${state.practiceLang==='es'?'tab-active':''}" id="lang-es">Spanish practice</button>
+      <button class="btn-secondary ${state.practiceLang==='en'?'tab-active':''}" id="lang-en">English practice</button>
+    </div>
+    ${state.practiceLang==='en' ? `
+      <button class="mode-btn" id="mode-copy-en" ${hasLists?'':'disabled'}>
+        <strong>Copy the English</strong>
+        <span>Listen to the word, then type it out once it appears.</span>
+      </button>
+    ` : `
+      <button class="mode-btn rot-l" id="mode-copy" ${hasLists?'':'disabled'}>
+        <strong>Copy the Spanish</strong>
+        <span>See the Spanish word with the English translation underneath, then type the Spanish word.</span>
+      </button>
+      <button class="mode-btn rot-r" id="mode-translate" ${hasLists?'':'disabled'}>
+        <strong>Translate to Spanish</strong>
+        <span>See only the English word, then type the Spanish translation.</span>
+      </button>
+    `}
   `;
   document.getElementById('btn-signout').onclick = async ()=>{ await signOut(auth); };
   const dismissInvite = document.getElementById('btn-dismiss-invite');
   if(dismissInvite) dismissInvite.onclick = ()=>{ state.inviteCodeToShow = null; render(); };
   document.getElementById('btn-upload').onclick = ()=>{ state.error=''; state.view='upload'; render(); };
+  document.getElementById('lang-es').onclick = ()=>{ state.practiceLang='es'; render(); };
+  document.getElementById('lang-en').onclick = ()=>{ state.practiceLang='en'; render(); };
   if(hasLists){
     state.lists.forEach(l=>{
       const chip = document.getElementById('chip-'+l.id);
@@ -832,8 +808,12 @@ function renderHome(){
         }
       };
     });
-    document.getElementById('mode-copy').onclick = ()=>startPractice('copy');
-    document.getElementById('mode-translate').onclick = ()=>startPractice('translate');
+    if(state.practiceLang==='en'){
+      document.getElementById('mode-copy-en').onclick = ()=>startPractice('copy-en');
+    }else{
+      document.getElementById('mode-copy').onclick = ()=>startPractice('copy');
+      document.getElementById('mode-translate').onclick = ()=>startPractice('translate');
+    }
   }
 }
 
@@ -985,13 +965,19 @@ function unlockSpeech(){
     window.speechSynthesis.speak(u);
   }catch(e){}
 }
+const PRACTICE_MODES = {
+  'copy':    { shownField:'spanish', gradeField:'spanish', showTranslation:true,  revealTimer:true,  audio:(w)=>[{ text:w.english, lang:'en-GB' },{ text:w.spanish, lang:'es-ES' }], placeholder:'Type the Spanish word' },
+  'copy-en': { shownField:'english', gradeField:'english', showTranslation:false, revealTimer:true,  audio:(w)=>[{ text:w.english, lang:'en-GB' }], placeholder:'Type the English word' },
+  'translate': { shownField:'english', gradeField:'spanish', showTranslation:false, revealTimer:false, audio:(w)=>[{ text:w.english, lang:'en-GB' }], placeholder:'Type the Spanish word' }
+};
+function modeInfo(mode){ return PRACTICE_MODES[mode] || PRACTICE_MODES['copy']; }
 async function startPractice(mode){
   unlockSpeech();
   clearCopyRevealTimer();
   if(!db || !authUser){ state.error = 'Sign in first.'; state.view='login'; render(); return; }
   const words = await getListWords(state.currentListId);
   if(!words.length){ state.error = "That list seems to be empty."; state.view='home'; render(); return; }
-  state.practice = { mode, words: shuffle(words), index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:false, reward:null, trophyVariant:null, newSevling:null, spanishHidden:false, spanishRevealed:false };
+  state.practice = { mode, words: shuffle(words), index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:false, reward:null, trophyVariant:null, newSevling:null, wordHidden:false, wordRevealed:false };
   state.error=''; state.view = 'practice'; render();
 }
 
@@ -1001,21 +987,21 @@ function clearCopyRevealTimer(){ if(copyRevealTimer){ clearTimeout(copyRevealTim
 function renderPractice(){
   const p = state.practice;
   const word = p.words[p.index];
-  const isCopy = p.mode === 'copy';
-  const shownWord = isCopy ? word.spanish : word.english;
-  const shownLang = isCopy ? 'es-ES' : 'en-GB';
-  const speakFirst = isCopy ? { text: word.english, lang: 'en-GB' } : null;
-  const spanishVisible = !isCopy || (p.spanishRevealed && !p.spanishHidden);
+  const info = modeInfo(p.mode);
+  const shownWord = word[info.shownField];
+  const shownLang = info.shownField==='spanish' ? 'es-ES' : 'en-GB';
+  const speakFirst = p.mode==='copy' ? { text: word.english, lang: 'en-GB' } : null;
+  const wordVisible = !info.revealTimer || (p.wordRevealed && !p.wordHidden);
   app.innerHTML = `
     <div class="progress">Word ${p.index+1} of ${p.words.length} &nbsp;\u00B7&nbsp; Score ${p.score}</div>
     <div class="card">
       <div class="word-row">
-        <div class="practice-word${spanishVisible ? '' : ' word-faded'}" id="practice-shown-word">${spanishVisible ? escapeHtml(shownWord) : ''}</div>
+        <div class="practice-word${wordVisible ? '' : ' word-faded'}" id="practice-shown-word">${wordVisible ? escapeHtml(shownWord) : ''}</div>
         ${speakBtn(shownWord, shownLang, speakFirst)}
       </div>
-      ${isCopy ? `<div class="practice-translation">${escapeHtml(word.english)}</div>` : ''}
+      ${info.showTranslation ? `<div class="practice-translation">${escapeHtml(word.english)}</div>` : ''}
       <input type="text" id="answer-input" autocomplete="off" autocapitalize="off" spellcheck="false"
-        placeholder="Type the Spanish word" ${p.checked ? 'disabled' : ''} value="${escapeHtml(p.input)}">
+        placeholder="${info.placeholder}" ${p.checked ? 'disabled' : ''} value="${escapeHtml(p.input)}">
       ${p.checked ? feedbackHtml(p, word) : ''}
     </div>
     <div class="btn-row">
@@ -1033,10 +1019,10 @@ function renderPractice(){
   else{ document.getElementById('btn-next').onclick = ()=>nextWord(); }
   document.getElementById('btn-quit').onclick = ()=>{ if(confirm('Stop this practice session?')){ clearCopyRevealTimer(); if('speechSynthesis' in window) window.speechSynthesis.cancel(); state.view='home'; render(); } };
   clearCopyRevealTimer();
-  if(isCopy && !p.checked && !p.spanishRevealed && !p.spanishHidden){
-    speakSequence([speakFirst, { text: shownWord, lang: shownLang }]).then(()=>{
-      if(!(state.practice===p && !p.checked && !p.spanishRevealed)) return;
-      p.spanishRevealed = true;
+  if(info.revealTimer && !p.checked && !p.wordRevealed && !p.wordHidden){
+    speakSequence(info.audio(word)).then(()=>{
+      if(!(state.practice===p && !p.checked && !p.wordRevealed)) return;
+      p.wordRevealed = true;
       const el = document.getElementById('practice-shown-word');
       if(el){ el.textContent = shownWord; el.classList.remove('word-faded'); }
       copyRevealTimer = setTimeout(()=>{
@@ -1045,7 +1031,7 @@ function renderPractice(){
         if(el2) el2.classList.add('word-faded');
         setTimeout(()=>{
           if(state.practice===p && !p.checked){
-            p.spanishHidden = true;
+            p.wordHidden = true;
             const el3 = document.getElementById('practice-shown-word');
             if(el3) el3.textContent = '';
           }
@@ -1058,15 +1044,20 @@ function accentSpanHtml(word){
   return escapeHtml(word).replace(/([\u00e1\u00e9\u00ed\u00f3\u00fa\u00fc\u00c1\u00c9\u00cd\u00d3\u00da\u00dc])/g, '<span class="accent-letter">$1</span>');
 }
 function feedbackHtml(p, word){
+  const info = modeInfo(p.mode);
+  const targetText = word[info.gradeField];
+  const targetLang = info.gradeField==='spanish' ? 'es-ES' : 'en-GB';
   if(p.lastCorrect){
-    if(p.accentMissing) return `<div class="feedback ok accent-note">Correct!<div class="answer-note">Don't forget the accent next time</div><div class="answer-word">${accentSpanHtml(word.spanish)} ${speakBtn(word.spanish,'es-ES')}</div></div>`;
+    if(p.accentMissing) return `<div class="feedback ok accent-note">Correct!<div class="answer-note">Don't forget the accent next time</div><div class="answer-word">${accentSpanHtml(targetText)} ${speakBtn(targetText,targetLang)}</div></div>`;
     return `<div class="feedback ok">Correct!</div>`;
   }
-  return `<div class="feedback no">Not quite<span class="answer">Correct spelling: ${escapeHtml(word.spanish)} ${speakBtn(word.spanish,'es-ES')}</span></div>`;
+  return `<div class="feedback no">Not quite<span class="answer">Correct spelling: ${escapeHtml(targetText)} ${speakBtn(targetText,targetLang)}</span></div>`;
 }
 function checkAnswer(word){
   const p = state.practice;
-  const target = normaliseBase(word.spanish);
+  const info = modeInfo(p.mode);
+  const targetText = word[info.gradeField];
+  const target = normaliseBase(targetText);
   const input = normaliseBase(p.input);
   const exact = input === target;
   const matchesIgnoringAccents = stripAccents(input) === stripAccents(target);
@@ -1089,7 +1080,7 @@ function randomTrophyVariant(){
 async function nextWord(){
   const p = state.practice;
   if(p.index+1 < p.words.length){
-    p.index++; p.checked = false; p.lastCorrect = false; p.accentMissing = false; p.input = ''; p.spanishHidden = false; p.spanishRevealed = false; render(); return;
+    p.index++; p.checked = false; p.lastCorrect = false; p.accentMissing = false; p.input = ''; p.wordHidden = false; p.wordRevealed = false; render(); return;
   }
   if(!p.isRetry){
     const reward = computeReward(p.wrong.length);
@@ -1187,7 +1178,7 @@ function renderResults(){
   `;
   if(p.wrong.length){
     document.getElementById('btn-retry').onclick = ()=>{
-      state.practice = { mode: p.mode, words: shuffle(p.wrong), index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:true, reward:null, trophyVariant:null, newSevling:null, spanishHidden:false, spanishRevealed:false };
+      state.practice = { mode: p.mode, words: shuffle(p.wrong), index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:true, reward:null, trophyVariant:null, newSevling:null, wordHidden:false, wordRevealed:false };
       state.view='practice'; render();
     };
   }
