@@ -229,7 +229,7 @@ const state = {
   view: 'settings', lists: [], currentListId: null,
   uploadImageB64: null, uploadImagePreview: null, extractedWords: [], listLabelDraft: '',
   busy: false, error: '', settingsMessage: '', firebaseConfigDraft: '', currentSevlingId: null, authMode: 'signin', practiceLang: 'es',
-  profiles: [], currentProfileId: null, pinTargetProfileId: null, pinAttempt: '', pinError: '', addProfileMode: 'new',
+  profiles: [], currentProfileId: null, addProfileMode: 'new',
   practice: { mode:null, words:[], index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:false, reward:null, trophyVariant:null, newSevling:null }
 };
 
@@ -378,12 +378,12 @@ async function saveFamilyInviteCode(code){
   catch(e){ state.error = `Couldn't save the invite code (${e.message}).`; return false; }
 }
 async function loadVoicePrefs(){
-  try{ const d = await fsGet('data','prefs'); return (d && d.voicePrefs) ? d.voicePrefs : null; }
+  try{ const d = await fsGetP('data','prefs'); return (d && d.voicePrefs) ? d.voicePrefs : null; }
   catch(e){ return null; }
 }
 async function saveVoicePrefs(prefs){
-  if(!db || !authUser){ state.error = 'Sign in first to save your voice choice.'; return false; }
-  try{ await fsSet('data','prefs', { voicePrefs: prefs }); return true; }
+  if(!db || !authUser || !state.currentProfileId){ state.error = 'Select a profile first to save your voice choice.'; return false; }
+  try{ await fsSetP('data','prefs', { voicePrefs: prefs }); return true; }
   catch(e){ state.error = `Couldn't save your voice choice (${e.message}).`; return false; }
 }
 function parseFirebaseConfigText(text){
@@ -409,21 +409,37 @@ function initFirebase(config){
 }
 async function handleAuthChange(){
   if(authUser){
-    game = await loadGame();
     settings.geminiKey = await loadFamilyGeminiKey();
     settings.inviteCode = await loadFamilyInviteCode();
-    settings.voicePrefs = await loadVoicePrefs();
-    state.lists = (await getIndex()).sort((a,b)=>b.savedAt-a.savedAt);
-    if(state.lists.length && !state.currentListId) state.currentListId = state.lists[0].id;
-    if(state.view==='login') state.view = 'home';
+    state.profiles = await loadProfiles();
+    state.currentProfileId = null;
+    game = emptyGameState();
+    if(state.view==='login') state.view = 'profiles';
   }else{
+    state.profiles = []; state.currentProfileId = null;
+    game = emptyGameState();
     if(state.view!=='settings') state.view = 'login';
   }
   render();
 }
+async function selectProfile(profileId){
+  state.currentProfileId = profileId;
+  game = await loadGame();
+  settings.voicePrefs = await loadVoicePrefs();
+  state.lists = (await getIndex()).sort((a,b)=>b.savedAt-a.savedAt);
+  const langLists = state.lists.filter(l=>(l.lang||'es')===state.practiceLang);
+  state.currentListId = langLists.length ? langLists[0].id : null;
+  state.error = ''; state.view = 'home'; render();
+}
+function switchProfile(){
+  state.currentProfileId = null;
+  game = emptyGameState();
+  state.view = 'profiles'; render();
+}
 
-// ---------- Firestore-backed storage, private per signed-in user ----------
-// Path shape: spelling_users/{uid}/{kind}/{id} - kind is 'data' (index/game) or 'lists' (one doc per list)
+// ---------- Firestore-backed storage ----------
+// Family-level path: spelling_users/{uid}/{kind}/{id} - only used for the profiles list itself now.
+// Profile-scoped path: spelling_users/{uid}/profiles/{profileId}/{kind}/{id} - everything else (word lists, coins, voice prefs).
 async function fsGet(kind, id){
   if(!db || !authUser) throw new Error('Sign in to sync.');
   const snap = await getDoc(doc(db,'spelling_users', authUser.uid, kind, id));
@@ -437,22 +453,44 @@ async function fsDelete(kind, id){
   if(!db || !authUser) throw new Error('Sign in to sync.');
   await deleteDoc(doc(db,'spelling_users', authUser.uid, kind, id));
 }
+async function fsGetP(kind, id){
+  if(!db || !authUser || !state.currentProfileId) throw new Error('Select a profile first.');
+  const snap = await getDoc(doc(db,'spelling_users', authUser.uid, 'profiles', state.currentProfileId, kind, id));
+  return snap.exists() ? snap.data() : null;
+}
+async function fsSetP(kind, id, dataObj){
+  if(!db || !authUser || !state.currentProfileId) throw new Error('Select a profile first.');
+  await setDoc(doc(db,'spelling_users', authUser.uid, 'profiles', state.currentProfileId, kind, id), dataObj);
+}
+async function fsDeleteP(kind, id){
+  if(!db || !authUser || !state.currentProfileId) throw new Error('Select a profile first.');
+  await deleteDoc(doc(db,'spelling_users', authUser.uid, 'profiles', state.currentProfileId, kind, id));
+}
+
+async function loadProfiles(){
+  try{ const d = await fsGet('data','profiles'); return (d && d.profiles) ? d.profiles : []; }
+  catch(e){ return []; }
+}
+async function saveProfilesList(list){
+  try{ await fsSet('data','profiles', { profiles: list }); return true; }
+  catch(e){ state.error = `Couldn't save profiles (${e.message}).`; return false; }
+}
 
 async function getIndex(){
-  try{ const d = await fsGet('data','index'); return (d && d.lists) ? d.lists : []; }
+  try{ const d = await fsGetP('data','index'); return (d && d.lists) ? d.lists : []; }
   catch(e){ return []; }
 }
 async function saveIndex(idx){
-  try{ await fsSet('data','index', { lists: idx }); }
+  try{ await fsSetP('data','index', { lists: idx }); }
   catch(e){ state.error = `Saved the list, but the list menu couldn't sync (${e.message}).`; }
 }
 async function getListWords(id){
-  try{ const d = await fsGet('lists', id); return (d && d.words) ? d.words : []; }
+  try{ const d = await fsGetP('lists', id); return (d && d.words) ? d.words : []; }
   catch(e){ return []; }
 }
 async function saveNewList(label, words, lang){
   const id = uid();
-  try{ await fsSet('lists', id, { words }); }
+  try{ await fsSetP('lists', id, { words }); }
   catch(e){
     state.error = `Couldn't save this list (${e.message}). Check Settings.`;
     return null;
@@ -463,20 +501,20 @@ async function saveNewList(label, words, lang){
   return id;
 }
 async function deleteList(id){
-  try{ await fsDelete('lists', id); }catch(e){}
+  try{ await fsDeleteP('lists', id); }catch(e){}
   const idx = (await getIndex()).filter(l=>l.id!==id);
   await saveIndex(idx);
 }
 async function loadGame(){
   const empty = emptyGameState();
   try{
-    const d = await fsGet('data','game');
+    const d = await fsGetP('data','game');
     if(d) return Object.assign(empty, d);
   }catch(e){}
   return empty;
 }
 async function saveGame(){
-  try{ await fsSet('data','game', game); }
+  try{ await fsSetP('data','game', game); }
   catch(e){ state.error = `Your coins couldn't sync (${e.message}).`; }
 }
 
@@ -586,7 +624,7 @@ function refreshBadge(){
   const el = document.getElementById('balance-badge');
   const totalMedals = game.medals.trophy + game.medals.gold + game.medals.silver + game.medals.bronze;
   el.innerHTML = `<span>\uD83C\uDFC5 ${totalMedals}</span><span>\u00A3${game.balance}</span>`;
-  el.onclick = ()=>{ if(authUser) state.view = 'trophies'; render(); };
+  el.onclick = ()=>{ if(authUser && state.currentProfileId) state.view = 'trophies'; render(); };
 }
 function wireSpeakButtons(){
   document.querySelectorAll('.speak-btn').forEach(b=>{
@@ -618,6 +656,8 @@ function lavaLampHtml(){
 
 function render(){
   if(state.view==='login') renderLogin();
+  else if(state.view==='profiles') renderProfiles();
+  else if(state.view==='add-profile') renderAddProfile();
   else if(state.view==='home') renderHome();
   else if(state.view==='upload') renderUpload();
   else if(state.view==='review') renderReview();
@@ -751,6 +791,151 @@ function wireAuthForm(mode){
 }
 
 function listsForLang(lang){ return state.lists.filter(l=>(l.lang||'es')===lang); }
+// ---------- profiles ----------
+function profileAvatar(name){
+  const palette = ['#FF3EA5','#00C2FF','#FFD447','#C4FF3D','#221A3D'];
+  const idx = (name||'').split('').reduce((a,c)=>a+c.charCodeAt(0),0) % palette.length;
+  return { letter: (name||'?').trim().charAt(0).toUpperCase() || '?', color: palette[idx] };
+}
+function renderProfiles(){
+  app.innerHTML = `
+    <div class="masthead" style="text-align:center;">
+      <h1>Who's practising?</h1>
+      <p>Pick a profile to continue.</p>
+    </div>
+    ${state.error ? `<div class="error-box">${state.error}</div>` : ''}
+    <div class="shop-grid">
+      ${state.profiles.map(p=>{
+        const av = profileAvatar(p.name);
+        return `<div class="shop-item" data-profile="${p.id}">
+          <div class="item-emoji" style="width:2.6rem;height:2.6rem;margin:0 auto 0.3rem auto;border-radius:50%;background:${av.color};color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Baloo 2',sans-serif;font-size:1.3rem;">${escapeHtml(av.letter)}</div>
+          <div class="item-name">${escapeHtml(p.name)}</div>
+        </div>`;
+      }).join('')}
+      <div class="shop-item" id="add-profile-tile" style="cursor:pointer;">
+        <div class="item-emoji" style="font-size:2.2rem;">\u2795</div>
+        <div class="item-name">Add profile</div>
+      </div>
+    </div>
+    <div class="btn-row" style="margin-top:1.2rem;">
+      <button class="btn-ghost" id="btn-signout-profiles">Sign out</button>
+    </div>
+  `;
+  document.querySelectorAll('[data-profile]').forEach(el=>{
+    el.onclick = ()=>selectProfile(el.dataset.profile);
+  });
+  document.getElementById('add-profile-tile').onclick = ()=>{ state.addProfileMode='new'; state.error=''; state.view='add-profile'; render(); };
+  document.getElementById('btn-signout-profiles').onclick = async ()=>{ await signOut(auth); };
+}
+
+function renderAddProfile(){
+  const mode = state.addProfileMode || 'new';
+  app.innerHTML = `
+    <h2 class="section-title">Add a profile</h2>
+    ${state.error ? `<div class="error-box">${state.error}</div>` : ''}
+    ${state.settingsMessage ? `<div class="ok-box">${state.settingsMessage}</div>` : ''}
+    <div class="btn-row" style="margin-bottom:0.8rem;">
+      <button class="btn-secondary ${mode==='new'?'tab-active':''}" id="ap-mode-new">New profile</button>
+      <button class="btn-secondary ${mode==='import'?'tab-active':''}" id="ap-mode-import">Import existing account</button>
+    </div>
+    ${mode==='new' ? `
+      <div class="card">
+        <p class="muted" style="margin-top:0;">A fresh profile, no existing coins, lists or Sevlings.</p>
+        <input type="text" id="ap-name" placeholder="Name">
+        <button class="btn-primary btn-block" id="btn-create-profile" ${state.busy?'disabled':''}>${state.busy?'<span class="spinner"></span>Creating\u2026':'Create profile'}</button>
+      </div>
+    ` : `
+      <div class="card">
+        <p class="muted" style="margin-top:0;">Bring an existing account's coins, Sevlings and word lists into a profile here. You'll need that account's own username and password, this doesn't change or delete the old account.</p>
+        <input type="text" id="ap-name" placeholder="Name for this profile">
+        <input type="text" id="ap-old-username" placeholder="Old account's username" autocapitalize="off">
+        <input type="password" id="ap-old-password" placeholder="Old account's password">
+        <button class="btn-primary btn-block" id="btn-import-profile" ${state.busy?'disabled':''}>${state.busy?'<span class="spinner"></span>Importing\u2026':'Import account'}</button>
+      </div>
+    `}
+    <button class="btn-ghost" id="btn-cancel-add-profile">Back</button>
+  `;
+  document.getElementById('ap-mode-new').onclick = ()=>{ state.addProfileMode='new'; state.error=''; render(); };
+  document.getElementById('ap-mode-import').onclick = ()=>{ state.addProfileMode='import'; state.error=''; render(); };
+  document.getElementById('btn-cancel-add-profile').onclick = ()=>{ state.error=''; state.view='profiles'; render(); };
+  if(mode==='new'){
+    document.getElementById('btn-create-profile').onclick = async ()=>{
+      const name = document.getElementById('ap-name').value.trim();
+      if(!name){ state.error='Enter a name.'; render(); return; }
+      state.busy = true; state.error=''; render();
+      const newId = uid();
+      const list = state.profiles.slice(); list.push({ id:newId, name });
+      const ok = await saveProfilesList(list);
+      state.busy = false;
+      if(ok){ state.profiles = list; await selectProfile(newId); }
+      else render();
+    };
+  }else{
+    document.getElementById('btn-import-profile').onclick = async ()=>{
+      const name = document.getElementById('ap-name').value.trim();
+      const oldUsername = document.getElementById('ap-old-username').value.trim();
+      const oldPassword = document.getElementById('ap-old-password').value;
+      if(!name || !oldUsername || !oldPassword){ state.error='Fill in every field.'; render(); return; }
+      state.busy = true; state.error=''; state.settingsMessage=''; render();
+      try{
+        const newId = uid();
+        const summary = await importLegacyAccount(oldUsername, oldPassword, newId);
+        const list = state.profiles.slice(); list.push({ id:newId, name });
+        const ok = await saveProfilesList(list);
+        state.busy = false;
+        if(ok){
+          state.profiles = list;
+          state.settingsMessage = `Imported ${summary.listsCount} list${summary.listsCount===1?'':'s'} and existing progress.`;
+          await selectProfile(newId);
+        }else render();
+      }catch(e){
+        state.busy = false;
+        state.error = e.message || 'Could not import that account.';
+        render();
+      }
+    };
+  }
+}
+
+async function importLegacyAccount(oldUsername, oldPassword, newProfileId){
+  const usernameKey = oldUsername.toLowerCase();
+  const mapDoc = await getDoc(doc(db,'usernames', usernameKey));
+  if(!mapDoc.exists()) throw new Error('No account found with that username.');
+  const oldEmail = mapDoc.data().email;
+
+  const secondaryApp = initializeApp(settings.firebaseConfig, 'legacy-import-' + Date.now());
+  const secondaryAuth = getAuth(secondaryApp);
+  const secondaryDb = getFirestore(secondaryApp);
+  let oldUid;
+  try{
+    const cred = await signInWithEmailAndPassword(secondaryAuth, oldEmail, oldPassword);
+    oldUid = cred.user.uid;
+  }catch(e){
+    throw new Error('Could not sign in to that old account, check the username and password.');
+  }
+
+  async function readOld(kind, id){
+    const snap = await getDoc(doc(secondaryDb,'spelling_users', oldUid, kind, id));
+    return snap.exists() ? snap.data() : null;
+  }
+  const oldIndexDoc = await readOld('data','index');
+  const oldGameDoc = await readOld('data','game');
+  const oldPrefsDoc = await readOld('data','prefs');
+  const oldLists = (oldIndexDoc && oldIndexDoc.lists) ? oldIndexDoc.lists : [];
+
+  if(oldIndexDoc) await setDoc(doc(db,'spelling_users', authUser.uid, 'profiles', newProfileId, 'data','index'), oldIndexDoc);
+  if(oldGameDoc) await setDoc(doc(db,'spelling_users', authUser.uid, 'profiles', newProfileId, 'data','game'), oldGameDoc);
+  if(oldPrefsDoc) await setDoc(doc(db,'spelling_users', authUser.uid, 'profiles', newProfileId, 'data','prefs'), oldPrefsDoc);
+  for(const l of oldLists){
+    const listDoc = await getDoc(doc(secondaryDb,'spelling_users', oldUid, 'lists', l.id));
+    if(listDoc.exists()){
+      await setDoc(doc(db,'spelling_users', authUser.uid, 'profiles', newProfileId, 'lists', l.id), listDoc.data());
+    }
+  }
+  try{ await signOut(secondaryAuth); }catch(e){}
+  return { listsCount: oldLists.length, hadGame: !!oldGameDoc };
+}
+
 function renderHome(){
   const langLists = listsForLang(state.practiceLang);
   const hasLists = langLists.length > 0;
@@ -760,7 +945,7 @@ function renderHome(){
       <p>Upload this week's word list, then practise typing it out.</p>
     </div>
     ${navRow('home')}
-    <p class="signed-in-line">Signed in as ${escapeHtml(authUser.displayName||'')} \u00B7 <button class="btn-ghost" id="btn-signout" style="padding:0;">Sign out</button></p>
+    <p class="signed-in-line">Practising as ${escapeHtml((state.profiles.find(p=>p.id===state.currentProfileId)||{}).name || '')} \u00B7 <button class="btn-ghost" id="btn-switch-profile" style="padding:0;">Switch profile</button> \u00B7 <button class="btn-ghost" id="btn-signout" style="padding:0;">Sign out</button></p>
     ${state.inviteCodeToShow ? `<div class="ok-box">Your family invite code is <strong>${escapeHtml(state.inviteCodeToShow)}</strong>, share it with anyone you want to invite. <button class="btn-ghost" id="btn-dismiss-invite" style="padding:0;">Got it</button></div>` : ''}
     ${state.error ? `<div class="error-box">${state.error}</div>` : ''}
 
@@ -796,6 +981,7 @@ function renderHome(){
       `<p class="muted">No ${state.practiceLang==='en'?'English':'Spanish'} lists saved yet, upload one above to get started.</p>`}
   `;
   document.getElementById('btn-signout').onclick = async ()=>{ await signOut(auth); };
+  document.getElementById('btn-switch-profile').onclick = ()=>switchProfile();
   const dismissInvite = document.getElementById('btn-dismiss-invite');
   if(dismissInvite) dismissInvite.onclick = ()=>{ state.inviteCodeToShow = null; render(); };
   document.getElementById('btn-upload').onclick = ()=>{ state.error=''; state.view='upload'; render(); };
@@ -1328,7 +1514,7 @@ function renderSettings(){
     loadVoices().then(()=>{ if(state.view==='settings') render(); });
   }
   app.innerHTML = `
-    ${authUser ? navRow('settings') : ''}
+    ${(authUser && state.currentProfileId) ? navRow('settings') : ''}
     <h2 class="section-title">Settings</h2>
     ${state.error ? `<div class="error-box">${state.error}</div>` : ''}
     ${state.settingsMessage ? `<div class="ok-box">${state.settingsMessage}</div>` : ''}
@@ -1342,12 +1528,12 @@ function renderSettings(){
 
     <div class="card">
       <h3 style="margin-top:0;">Voice</h3>
-      <p class="muted">Choose which of this device's installed voices reads Spanish and English aloud. Saved to your own account, so it's just for you, but a device that doesn't have the exact voice you pick will fall back to its best automatic match instead.</p>
+      <p class="muted">Choose which of this device's installed voices reads Spanish and English aloud. Saved to this profile, so each person can choose differently, but a device that doesn't have the exact voice picked will fall back to its best automatic match instead.</p>
       <label class="muted" style="display:block;margin-bottom:0.2rem;">Spanish voice</label>
-      <select id="voice-es" ${authUser ? '' : 'disabled'}>${voiceOptionsHtml(cachedVoices, 'es', settings.voicePrefs && settings.voicePrefs.es && settings.voicePrefs.es.name)}</select>
+      <select id="voice-es" ${(authUser && state.currentProfileId) ? '' : 'disabled'}>${voiceOptionsHtml(cachedVoices, 'es', settings.voicePrefs && settings.voicePrefs.es && settings.voicePrefs.es.name)}</select>
       <label class="muted" style="display:block;margin:0.6rem 0 0.2rem 0;">English voice</label>
-      <select id="voice-en" ${authUser ? '' : 'disabled'}>${voiceOptionsHtml(cachedVoices, 'en', settings.voicePrefs && settings.voicePrefs.en && settings.voicePrefs.en.name)}</select>
-      ${!authUser ? `<p class="muted" style="margin-top:0.5rem;">Sign in first to save this, it lives on your own account rather than this device.</p>` : ''}
+      <select id="voice-en" ${(authUser && state.currentProfileId) ? '' : 'disabled'}>${voiceOptionsHtml(cachedVoices, 'en', settings.voicePrefs && settings.voicePrefs.en && settings.voicePrefs.en.name)}</select>
+      ${!(authUser && state.currentProfileId) ? `<p class="muted" style="margin-top:0.5rem;">Select a profile first to save this.</p>` : ''}
     </div>
 
     <div class="card">
@@ -1383,7 +1569,7 @@ function renderSettings(){
       if(ok2) settings.inviteCode = inviteVal.toUpperCase();
       else { render(); return; }
     }
-    if(authUser){
+    if(authUser && state.currentProfileId){
       const esVal = document.getElementById('voice-es').value;
       const enVal = document.getElementById('voice-en').value;
       const newPrefs = {};
