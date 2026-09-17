@@ -229,14 +229,16 @@ const state = {
   view: 'settings', lists: [], currentListId: null,
   uploadImageB64: null, uploadImagePreview: null, extractedWords: [], listLabelDraft: '',
   busy: false, error: '', settingsMessage: '', firebaseConfigDraft: '', currentSevlingId: null, authMode: 'signin', practiceLang: 'es',
+  profiles: [], currentProfileId: null, pinTargetProfileId: null, pinAttempt: '', pinError: '', addProfileMode: 'new',
   practice: { mode:null, words:[], index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:false, reward:null, trophyVariant:null, newSevling:null }
 };
 
-let game = { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, perfectStreak:0, streakGoal:4, lastSevlingAt:null, cooldownDays:14 };
+function emptyGameState(){ return { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, streaks:{es:0,en:0}, streakGoal:4, lastSevlingAt:null, cooldownDays:14 }; }
+let game = emptyGameState();
 let settings = { firebaseConfig:null };
 let fbApp = null, db = null, auth = null, authUser = null;
 
-// This is Lulworth family's shared Firebase project config. It is not a secret, it is a
+// This is the family's shared Firebase project config. It is not a secret, it is a
 // public identifier, protection comes entirely from the Firestore security rules published
 // on that project (see spelling-practice-setup.md). Baking it in here means nobody needs to
 // paste anything, the app connects automatically as soon as it's opened.
@@ -249,7 +251,8 @@ const DEFAULT_FIREBASE_CONFIG = {
   appId: "1:972390353141:web:483aeee0704ae46247ddbc"
 };
 
-const EXTRACT_PROMPT = "This photo shows a child's Spanish vocabulary list, with Spanish words and their English translations, in whatever column order they appear. Read every word pair on the page. Ignore any list numbers, bullet points, or other list markers next to each word, they are not part of the word itself. Do not include leading punctuation such as \u00bf or \u00a1, just the word or phrase. Respond with ONLY a valid JSON array, no markdown fences, no commentary, in this exact format: [{\"spanish\":\"palabra\",\"english\":\"word\"}]. Keep the original spelling, capitalisation and accents exactly as written, aside from list numbering and leading \u00bf/\u00a1. If a word is hard to read, give your best reading rather than skipping it.";
+const EXTRACT_PROMPT_ES = "This photo shows a child's Spanish vocabulary list, with Spanish words and their English translations, in whatever column order they appear. Read every word pair on the page. Ignore any list numbers, bullet points, or other list markers next to each word, they are not part of the word itself. Do not include leading punctuation such as \u00bf or \u00a1, just the word or phrase. Respond with ONLY a valid JSON array, no markdown fences, no commentary, in this exact format: [{\"spanish\":\"palabra\",\"english\":\"word\"}]. Keep the original spelling, capitalisation and accents exactly as written, aside from list numbering and leading \u00bf/\u00a1. If a word is hard to read, give your best reading rather than skipping it.";
+const EXTRACT_PROMPT_EN = "This photo shows a child's English spelling word list, one word (or short phrase) per line, no translation needed. Read every word on the page. Ignore any list numbers, bullet points, or other list markers next to each word, they are not part of the word itself. Respond with ONLY a valid JSON array, no markdown fences, no commentary, in this exact format: [{\"english\":\"word\"}]. Keep the original spelling and capitalisation exactly as written, aside from list numbering. If a word is hard to read, give your best reading rather than skipping it.";
 
 function uid(){ return 'w' + Date.now() + Math.random().toString(36).slice(2,7); }
 function genInviteCode(){ return Math.random().toString(36).slice(2,8).toUpperCase(); }
@@ -447,7 +450,7 @@ async function getListWords(id){
   try{ const d = await fsGet('lists', id); return (d && d.words) ? d.words : []; }
   catch(e){ return []; }
 }
-async function saveNewList(label, words){
+async function saveNewList(label, words, lang){
   const id = uid();
   try{ await fsSet('lists', id, { words }); }
   catch(e){
@@ -455,7 +458,7 @@ async function saveNewList(label, words){
     return null;
   }
   const idx = await getIndex();
-  idx.push({ id, label, count: words.length, savedAt: Date.now() });
+  idx.push({ id, label, count: words.length, savedAt: Date.now(), lang: lang || 'es' });
   await saveIndex(idx);
   return id;
 }
@@ -465,7 +468,7 @@ async function deleteList(id){
   await saveIndex(idx);
 }
 async function loadGame(){
-  const empty = { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, perfectStreak:0, streakGoal:4, lastSevlingAt:null, cooldownDays:14 };
+  const empty = emptyGameState();
   try{
     const d = await fsGet('data','game');
     if(d) return Object.assign(empty, d);
@@ -527,15 +530,16 @@ async function resizeImageToBase64(file){
     }
   }
 }
-async function extractWords(b64){
+async function extractWords(b64, lang){
   if(!settings.geminiKey) throw new Error('Add a Gemini API key in Settings first.');
+  const promptText = lang==='en' ? EXTRACT_PROMPT_EN : EXTRACT_PROMPT_ES;
   const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/interactions?key=${encodeURIComponent(settings.geminiKey)}`, {
     method:'POST',
     headers:{ 'Content-Type':'application/json' },
     body: JSON.stringify({
       model:'gemini-3.6-flash',
       input:[
-        { type:'text', text: EXTRACT_PROMPT },
+        { type:'text', text: promptText },
         { type:'image', data:b64, mime_type:'image/jpeg' }
       ],
       response_format:{ type:'text', mime_type:'application/json' }
@@ -550,6 +554,7 @@ async function extractWords(b64){
   if(!raw) throw new Error('No text in the response, the photo may be unclear.');
   const parsed = JSON.parse(raw);
   if(!Array.isArray(parsed)) throw new Error('Unexpected response.');
+  if(lang==='en') return parsed.map(w=>({ spanish:'', english:cleanExtractedWord(w.english) })).filter(w=>w.english);
   return parsed.map(w=>({ spanish:cleanExtractedWord(w.spanish), english:cleanExtractedWord(w.english) })).filter(w=>w.spanish||w.english);
 }
 function cleanExtractedWord(s){
@@ -745,8 +750,10 @@ function wireAuthForm(mode){
   }
 }
 
+function listsForLang(lang){ return state.lists.filter(l=>(l.lang||'es')===lang); }
 function renderHome(){
-  const hasLists = state.lists.length > 0;
+  const langLists = listsForLang(state.practiceLang);
+  const hasLists = langLists.length > 0;
   app.innerHTML = `
     <div class="masthead">
       <h1>Spelling Practice</h1>
@@ -757,16 +764,6 @@ function renderHome(){
     ${state.inviteCodeToShow ? `<div class="ok-box">Your family invite code is <strong>${escapeHtml(state.inviteCodeToShow)}</strong>, share it with anyone you want to invite. <button class="btn-ghost" id="btn-dismiss-invite" style="padding:0;">Got it</button></div>` : ''}
     ${state.error ? `<div class="error-box">${state.error}</div>` : ''}
 
-    <h2 class="section-title">This week's list</h2>
-    <div class="card">
-      <p class="muted" style="margin-top:0;">Take or choose a photo of the vocabulary sheet and we'll read out the words.</p>
-      <button class="btn-primary btn-block" id="btn-upload">Add a new list from a photo</button>
-    </div>
-
-    <h2 class="section-title">Saved lists</h2>
-    ${hasLists ? `<div id="list-container">${state.lists.map(listChip).join('')}</div>` :
-      `<p class="muted">No lists saved yet, upload one above to get started.</p>`}
-
     <h2 class="section-title" style="margin-top:1.4rem;">Practise</h2>
     <div class="btn-row" style="margin-bottom:0.8rem;">
       <button class="btn-secondary ${state.practiceLang==='es'?'tab-active':''}" id="lang-es">Spanish practice</button>
@@ -774,7 +771,7 @@ function renderHome(){
     </div>
     ${state.practiceLang==='en' ? `
       <button class="mode-btn" id="mode-copy-en" ${hasLists?'':'disabled'}>
-        <strong>Copy the English</strong>
+        <strong>English spelling</strong>
         <span>Listen to the word, then type it out once it appears.</span>
       </button>
     ` : `
@@ -787,15 +784,25 @@ function renderHome(){
         <span>See only the English word, then type the Spanish translation.</span>
       </button>
     `}
+
+    <h2 class="section-title" style="margin-top:1.4rem;">${state.practiceLang==='en'?'English':'Spanish'} word list</h2>
+    <div class="card">
+      <p class="muted" style="margin-top:0;">Take or choose a photo of ${state.practiceLang==='en'?'an English spelling list':'the vocabulary sheet'} and we'll read out the words.</p>
+      <button class="btn-primary btn-block" id="btn-upload">Add a new list from a photo</button>
+    </div>
+
+    <h2 class="section-title">Saved ${state.practiceLang==='en'?'English':'Spanish'} lists</h2>
+    ${hasLists ? `<div id="list-container">${langLists.map(listChip).join('')}</div>` :
+      `<p class="muted">No ${state.practiceLang==='en'?'English':'Spanish'} lists saved yet, upload one above to get started.</p>`}
   `;
   document.getElementById('btn-signout').onclick = async ()=>{ await signOut(auth); };
   const dismissInvite = document.getElementById('btn-dismiss-invite');
   if(dismissInvite) dismissInvite.onclick = ()=>{ state.inviteCodeToShow = null; render(); };
   document.getElementById('btn-upload').onclick = ()=>{ state.error=''; state.view='upload'; render(); };
-  document.getElementById('lang-es').onclick = ()=>{ state.practiceLang='es'; render(); };
-  document.getElementById('lang-en').onclick = ()=>{ state.practiceLang='en'; render(); };
+  document.getElementById('lang-es').onclick = ()=>{ state.practiceLang='es'; const l=listsForLang('es'); state.currentListId = l.length?l[0].id:null; render(); };
+  document.getElementById('lang-en').onclick = ()=>{ state.practiceLang='en'; const l=listsForLang('en'); state.currentListId = l.length?l[0].id:null; render(); };
   if(hasLists){
-    state.lists.forEach(l=>{
+    langLists.forEach(l=>{
       const chip = document.getElementById('chip-'+l.id);
       chip.onclick = (e)=>{ if(e.target.classList.contains('del')) return; state.currentListId = l.id; render(); };
       document.getElementById('del-'+l.id).onclick = async (e)=>{
@@ -803,7 +810,7 @@ function renderHome(){
         if(confirm(`Delete "${l.label}"? This can't be undone.`)){
           await deleteList(l.id);
           state.lists = (await getIndex()).sort((a,b)=>b.savedAt-a.savedAt);
-          if(state.currentListId===l.id) state.currentListId = state.lists[0] ? state.lists[0].id : null;
+          if(state.currentListId===l.id){ const rest=listsForLang(state.practiceLang).filter(x=>x.id!==l.id); state.currentListId = rest.length ? rest[0].id : null; }
           render();
         }
       };
@@ -831,8 +838,9 @@ function listChip(l){
 
 function renderUpload(){
   const noKey = !settings.geminiKey;
+  const lang = state.practiceLang;
   app.innerHTML = `
-    <h2 class="section-title">Add this week's list</h2>
+    <h2 class="section-title">Add ${lang==='en'?'an English spelling':"this week's Spanish"} list</h2>
     ${state.error ? `<div class="error-box">${state.error}</div>` : ''}
     ${noKey ? `
       <div class="card">
@@ -843,7 +851,7 @@ function renderUpload(){
       </div>
     ` : ''}
     <div class="drop-zone">
-      ${state.uploadImagePreview ? `<img class="thumb" src="${state.uploadImagePreview}">` : `<p class="muted">Take a photo of the word list, or choose one from your camera roll.</p>`}
+      ${state.uploadImagePreview ? `<img class="thumb" src="${state.uploadImagePreview}">` : `<p class="muted">Take a photo of ${lang==='en'?'the spelling list':'the vocabulary sheet'}, or choose one from your camera roll.</p>`}
       <input type="file" accept="image/*" id="file-input" style="display:none;">
       <div class="btn-row" style="justify-content:center;">
         <button class="btn-secondary" id="btn-choose" ${noKey ? 'disabled' : ''}>${state.uploadImagePreview ? 'Choose a different photo' : 'Take or choose photo'}</button>
@@ -884,7 +892,7 @@ function renderUpload(){
   document.getElementById('btn-extract').onclick = async ()=>{
     state.busy = true; state.error=''; render();
     try{
-      const words = await extractWords(state.uploadImageB64);
+      const words = await extractWords(state.uploadImageB64, lang);
       if(!words.length){
         state.error = "We couldn't find any words in that photo. Try a clearer photo, or add the words without a photo.";
         state.busy = false; render(); return;
@@ -908,13 +916,14 @@ function renderUpload(){
 }
 
 function renderReview(){
+  const lang = state.practiceLang;
   app.innerHTML = `
     <h2 class="section-title">Check the list</h2>
     <p class="muted">Fix anything that wasn't read correctly, then save.</p>
     ${state.error ? `<div class="error-box">${state.error}</div>` : ''}
     <table class="review">
-      <thead><tr><th>Spanish</th><th>English</th><th></th></tr></thead>
-      <tbody id="review-body">${state.extractedWords.map((w,i)=>reviewRow(w,i)).join('')}</tbody>
+      <thead><tr>${lang==='en' ? '<th>English word</th>' : '<th>Spanish</th><th>English</th>'}<th></th></tr></thead>
+      <tbody id="review-body">${state.extractedWords.map((w,i)=>reviewRow(w,i,lang)).join('')}</tbody>
     </table>
     <button class="btn-secondary" id="btn-add-row">Add a word</button>
     <h3 class="section-title" style="margin-top:1.4rem;">List name</h3>
@@ -928,10 +937,12 @@ function renderReview(){
   document.getElementById('btn-add-row').onclick = ()=>{ state.extractedWords.push({ spanish:'', english:'' }); render(); };
   document.getElementById('label-input').oninput = (e)=>{ state.listLabelDraft = e.target.value; };
   document.getElementById('btn-save').onclick = async ()=>{
-    const words = state.extractedWords.map(w=>({ spanish:w.spanish.trim(), english:w.english.trim() })).filter(w=>w.spanish && w.english);
-    if(!words.length){ state.error = 'Add at least one complete word pair before saving.'; render(); return; }
+    const words = lang==='en'
+      ? state.extractedWords.map(w=>({ spanish:'', english:w.english.trim() })).filter(w=>w.english)
+      : state.extractedWords.map(w=>({ spanish:w.spanish.trim(), english:w.english.trim() })).filter(w=>w.spanish && w.english);
+    if(!words.length){ state.error = lang==='en' ? 'Add at least one word before saving.' : 'Add at least one complete word pair before saving.'; render(); return; }
     const label = state.listLabelDraft.trim() || todayLabel();
-    const id = await saveNewList(label, words);
+    const id = await saveNewList(label, words, lang);
     if(id){
       state.uploadImageB64 = null; state.uploadImagePreview = null; state.extractedWords = [];
       state.lists = (await getIndex()).sort((a,b)=>b.savedAt-a.savedAt);
@@ -944,7 +955,13 @@ function renderReview(){
     state.view = 'home'; render();
   };
 }
-function reviewRow(w,i){
+function reviewRow(w,i,lang){
+  if(lang==='en'){
+    return `<tr>
+      <td><input type="text" class="row-en" data-i="${i}" value="${escapeHtml(w.english)}"></td>
+      <td><button class="rm" data-i="${i}" aria-label="Remove word">&times;</button></td>
+    </tr>`;
+  }
   return `<tr>
     <td><input type="text" class="row-es" data-i="${i}" value="${escapeHtml(w.spanish)}"></td>
     <td><input type="text" class="row-en" data-i="${i}" value="${escapeHtml(w.english)}"></td>
@@ -1095,18 +1112,21 @@ async function nextWord(){
   state.view = 'results'; render();
 }
 function randInt(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
+function practiceLangOf(mode){ return modeInfo(mode).gradeField==='english' ? 'en' : 'es'; }
 async function checkSevlingUnlock(p){
-  if(p.wrong.length===0) game.perfectStreak = (game.perfectStreak||0) + 1;
+  const lang = practiceLangOf(p.mode);
+  if(!game.streaks) game.streaks = { es:0, en:0 };
+  if(p.wrong.length===0) game.streaks[lang] = (game.streaks[lang]||0) + 1;
   const cooldownMs = (game.cooldownDays||14) * 24*60*60*1000;
   const cooldownReady = !game.lastSevlingAt || (Date.now() - game.lastSevlingAt) >= cooldownMs;
-  const streakReady = game.perfectStreak >= (game.streakGoal||4);
+  const streakReady = game.streaks[lang] >= (game.streakGoal||4);
   if(streakReady && cooldownReady){
     const locked = SEVLINGS.filter(s=>!game.unlockedSevlings.includes(s.id));
     if(locked.length){
       const won = locked[Math.floor(Math.random()*locked.length)];
       game.unlockedSevlings.push(won.id);
       game.sevlingCare[won.id] = { happiness:50, accessories:[] };
-      game.perfectStreak = 0;
+      game.streaks = { es:0, en:0 };
       game.streakGoal = randInt(4,5);
       game.lastSevlingAt = Date.now();
       game.cooldownDays = randInt(14,21);
@@ -1115,13 +1135,15 @@ async function checkSevlingUnlock(p){
   }
 }
 function collectionLabel(id){ return ({ farm:'Farm', jungle:'Jungle', sea:'Sea', pets:'Pets' })[id] || id; }
-function sevlingsProgressLine(){
-  const remaining = Math.max(0, (game.streakGoal||4) - (game.perfectStreak||0));
+function sevlingsProgressLine(lang){
+  const streaks = game.streaks || { es:0, en:0 };
+  const remaining = Math.max(0, (game.streakGoal||4) - (streaks[lang]||0));
   const cooldownMs = (game.cooldownDays||14) * 24*60*60*1000;
   const daysLeft = game.lastSevlingAt ? Math.max(0, Math.ceil((cooldownMs - (Date.now()-game.lastSevlingAt)) / 86400000)) : 0;
-  if(remaining<=0 && daysLeft<=0) return 'Get every word right on your next practice to win a new Sevling!';
+  const langLabel = lang==='en' ? 'English' : 'Spanish';
+  if(remaining<=0 && daysLeft<=0) return `Get every word right on your next ${langLabel} practice to win a new Sevling!`;
   const parts = [];
-  if(remaining>0) parts.push(`${remaining} more perfect test${remaining===1?'':'s'}`);
+  if(remaining>0) parts.push(`${remaining} more perfect ${langLabel} test${remaining===1?'':'s'}`);
   if(daysLeft>0) parts.push(`${daysLeft} more day${daysLeft===1?'':'s'}`);
   return `${parts.join(' and ')} until your next Sevling.`;
 }
@@ -1134,7 +1156,7 @@ function sevlingProgressHtml(p){
       <p class="muted" style="margin:0.2rem 0 0 0;">New in your ${collectionLabel(s.collection)} Sevlings collection</p>
     </div>`;
   }
-  return `<div class="card"><p class="muted" style="text-align:center;margin:0;">${sevlingsProgressLine()}</p></div>`;
+  return `<div class="card"><p class="muted" style="text-align:center;margin:0;">${sevlingsProgressLine(practiceLangOf(p.mode))}</p></div>`;
 }
 function rewardBlockHtml(p){
   if(!p.reward) return `<div class="card"><p class="muted" style="text-align:center;margin:0;">No reward this time, get 4 or fewer wrong next time to win one.</p></div>`;
@@ -1234,8 +1256,9 @@ function renderSevlings(){
   app.innerHTML = `
     ${navRow('sevlings')}
     <h2 class="section-title">Sevlings</h2>
-    <p class="muted">You've found ${unlockedCount} of ${SEVLINGS.length} Sevlings. Win a new one for every ${game.streakGoal||4} fully correct practices, roughly every few weeks.</p>
-    <div class="card"><p class="muted" style="text-align:center;margin:0;">${sevlingsProgressLine()}</p></div>
+    <p class="muted">You've found ${unlockedCount} of ${SEVLINGS.length} Sevlings. Win a new one for every ${game.streakGoal||4} fully correct practices in a row, in either language, roughly every few weeks. Spanish and English progress are tracked separately, so they don't add together.</p>
+    <div class="card"><p class="muted" style="text-align:center;margin:0;"><strong>Spanish:</strong> ${sevlingsProgressLine('es')}</p></div>
+    <div class="card"><p class="muted" style="text-align:center;margin:0;"><strong>English:</strong> ${sevlingsProgressLine('en')}</p></div>
     ${COLLECTIONS.map(([id,label])=>`
       <h3 class="section-title" style="margin-top:1.2rem;">${label}</h3>
       <div class="shop-grid">${SEVLINGS.filter(s=>s.collection===id).map(sevlingTile).join('')}</div>
