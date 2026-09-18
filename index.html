@@ -229,11 +229,11 @@ const state = {
   view: 'settings', lists: [], currentListId: null,
   uploadImageB64: null, uploadImagePreview: null, extractedWords: [], listLabelDraft: '',
   busy: false, error: '', settingsMessage: '', firebaseConfigDraft: '', currentSevlingId: null, authMode: 'signin', practiceLang: 'es',
-  profiles: [], currentProfileId: null, addProfileMode: 'new',
+  profiles: [], currentProfileId: null, addProfileMode: 'new', c4: null, snake: null,
   practice: { mode:null, words:[], index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:false, reward:null, trophyVariant:null, newSevling:null }
 };
 
-function emptyGameState(){ return { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, streaks:{es:0,en:0}, streakGoal:4, lastSevlingAt:null, cooldownDays:14 }; }
+function emptyGameState(){ return { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, listStreaks:{}, streakGoal:4, lastSevlingAt:null, cooldownDays:14, arcadeMs:0, gameUnlockStreaks:{}, selectedSnakeSevling:null, selectedConnect4Sevling:null }; }
 let game = emptyGameState();
 let settings = { firebaseConfig:null };
 let fbApp = null, db = null, auth = null, authUser = null;
@@ -496,7 +496,7 @@ async function saveNewList(label, words, lang){
     return null;
   }
   const idx = await getIndex();
-  idx.push({ id, label, count: words.length, savedAt: Date.now(), lang: lang || 'es' });
+  idx.push({ id, label, count: words.length, savedAt: Date.now(), lang: lang || 'es', mastered: false });
   await saveIndex(idx);
   return id;
 }
@@ -640,13 +640,14 @@ function wireSpeakButtons(){
 }
 function wireNav(){
   document.querySelectorAll('[data-nav]').forEach(b=>{
-    b.onclick = ()=>{ state.view = b.dataset.nav; render(); };
+    b.onclick = ()=>{ stopAllArcadeIntervals(); state.view = b.dataset.nav; render(); };
   });
 }
 function navRow(active){
   return `<div class="btn-row nav-row">
     <button class="btn-secondary ${active==='home'?'tab-active':''}" data-nav="home">Home</button>
     <button class="btn-secondary ${active==='sevlings'?'tab-active':''}" data-nav="sevlings">Sevlings</button>
+    <button class="btn-secondary ${active==='arcade'?'tab-active':''}" data-nav="arcade">Arcade</button>
     <button class="btn-secondary ${active==='settings'?'tab-active':''}" data-nav="settings">Settings</button>
   </div>`;
 }
@@ -666,6 +667,9 @@ function render(){
   else if(state.view==='sevlings') renderSevlings();
   else if(state.view==='sevling-care') renderSevlingCare();
   else if(state.view==='trophies') renderTrophies();
+  else if(state.view==='arcade') renderArcade();
+  else if(state.view==='arcade-connect4') renderConnect4();
+  else if(state.view==='arcade-snake') renderSnakeGame();
   else if(state.view==='settings') renderSettings();
   wireSpeakButtons(); wireNav(); refreshBadge();
 }
@@ -1180,7 +1184,7 @@ async function startPractice(mode){
   if(!db || !authUser){ state.error = 'Sign in first.'; state.view='login'; render(); return; }
   const words = await getListWords(state.currentListId);
   if(!words.length){ state.error = "That list seems to be empty."; state.view='home'; render(); return; }
-  state.practice = { mode, words: shuffle(words), index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:false, reward:null, trophyVariant:null, newSevling:null, wordHidden:false, wordRevealed:false };
+  state.practice = { mode, listId: state.currentListId, words: shuffle(words), index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:false, reward:null, trophyVariant:null, newSevling:null, wordHidden:false, wordRevealed:false };
   state.error=''; state.view = 'practice'; render();
 }
 
@@ -1223,6 +1227,8 @@ function renderPractice(){
   document.getElementById('btn-quit').onclick = ()=>{ if(confirm('Stop this practice session?')){ clearCopyRevealTimer(); if('speechSynthesis' in window) window.speechSynthesis.cancel(); state.view='home'; render(); } };
   clearCopyRevealTimer();
   if(info.revealTimer && !p.checked && !p.wordRevealed && !p.wordHidden){
+    const listMeta = state.lists.find(l=>l.id===p.listId);
+    const visibleMs = (listMeta && listMeta.mastered) ? 3000 : 5000;
     speakSequence(info.audio(word)).then(()=>{
       if(!(state.practice===p && !p.checked && !p.wordRevealed)) return;
       p.wordRevealed = true;
@@ -1239,7 +1245,7 @@ function renderPractice(){
             if(el3) el3.textContent = '';
           }
         }, 450);
-      }, 5000);
+      }, visibleMs);
     });
   }
 }
@@ -1292,27 +1298,48 @@ async function nextWord(){
       game.totalEarned += reward.value; game.balance += reward.value; game.medals[reward.type]++;
       p.trophyVariant = reward.type==='trophy' ? randomTrophyVariant() : null;
     }
+    const pct = Math.round((p.score / p.words.length) * 100);
+    p.pct = pct;
     await checkSevlingUnlock(p);
+    checkArcadeUnlock(p, pct);
     await saveGame();
+    if(p.wrong.length===0 && p.listId){
+      const listMeta = state.lists.find(l=>l.id===p.listId);
+      if(listMeta && !listMeta.mastered){
+        listMeta.mastered = true;
+        await saveIndex(state.lists);
+      }
+    }
   }else{ p.reward = null; }
   state.view = 'results'; render();
 }
+function checkArcadeUnlock(p, pct){
+  if(!p.listId) return;
+  if(!game.gameUnlockStreaks) game.gameUnlockStreaks = {};
+  if(pct >= 90){
+    game.gameUnlockStreaks[p.listId] = (game.gameUnlockStreaks[p.listId]||0) + 1;
+    if(game.gameUnlockStreaks[p.listId] >= 3){
+      game.arcadeMs = (game.arcadeMs||0) + 5*60*1000;
+      game.gameUnlockStreaks[p.listId] = 0;
+      p.arcadeUnlocked = true;
+    }
+  }
+}
 function randInt(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
-function practiceLangOf(mode){ return modeInfo(mode).gradeField==='english' ? 'en' : 'es'; }
 async function checkSevlingUnlock(p){
-  const lang = practiceLangOf(p.mode);
-  if(!game.streaks) game.streaks = { es:0, en:0 };
-  if(p.wrong.length===0) game.streaks[lang] = (game.streaks[lang]||0) + 1;
+  if(!p.listId) return;
+  if(!game.listStreaks) game.listStreaks = {};
+  if(p.wrong.length===0) game.listStreaks[p.listId] = (game.listStreaks[p.listId]||0) + 1;
   const cooldownMs = (game.cooldownDays||14) * 24*60*60*1000;
   const cooldownReady = !game.lastSevlingAt || (Date.now() - game.lastSevlingAt) >= cooldownMs;
-  const streakReady = game.streaks[lang] >= (game.streakGoal||4);
+  const streakReady = (game.listStreaks[p.listId]||0) >= (game.streakGoal||4);
   if(streakReady && cooldownReady){
     const locked = SEVLINGS.filter(s=>!game.unlockedSevlings.includes(s.id));
     if(locked.length){
       const won = locked[Math.floor(Math.random()*locked.length)];
       game.unlockedSevlings.push(won.id);
       game.sevlingCare[won.id] = { happiness:50, accessories:[] };
-      game.streaks = { es:0, en:0 };
+      game.listStreaks = {};
       game.streakGoal = randInt(4,5);
       game.lastSevlingAt = Date.now();
       game.cooldownDays = randInt(14,21);
@@ -1321,15 +1348,15 @@ async function checkSevlingUnlock(p){
   }
 }
 function collectionLabel(id){ return ({ farm:'Farm', jungle:'Jungle', sea:'Sea', pets:'Pets' })[id] || id; }
-function sevlingsProgressLine(lang){
-  const streaks = game.streaks || { es:0, en:0 };
-  const remaining = Math.max(0, (game.streakGoal||4) - (streaks[lang]||0));
+function sevlingsProgressLine(listId, listLabel){
+  const streaks = game.listStreaks || {};
+  const remaining = Math.max(0, (game.streakGoal||4) - (streaks[listId]||0));
   const cooldownMs = (game.cooldownDays||14) * 24*60*60*1000;
   const daysLeft = game.lastSevlingAt ? Math.max(0, Math.ceil((cooldownMs - (Date.now()-game.lastSevlingAt)) / 86400000)) : 0;
-  const langLabel = lang==='en' ? 'English' : 'Spanish';
-  if(remaining<=0 && daysLeft<=0) return `Get every word right on your next ${langLabel} practice to win a new Sevling!`;
+  const label = listLabel ? `"${listLabel}"` : 'this list';
+  if(remaining<=0 && daysLeft<=0) return `Get every word right on your next practice with ${label} to win a new Sevling!`;
   const parts = [];
-  if(remaining>0) parts.push(`${remaining} more perfect ${langLabel} test${remaining===1?'':'s'}`);
+  if(remaining>0) parts.push(`${remaining} more perfect test${remaining===1?'':'s'} with ${label}`);
   if(daysLeft>0) parts.push(`${daysLeft} more day${daysLeft===1?'':'s'}`);
   return `${parts.join(' and ')} until your next Sevling.`;
 }
@@ -1342,7 +1369,8 @@ function sevlingProgressHtml(p){
       <p class="muted" style="margin:0.2rem 0 0 0;">New in your ${collectionLabel(s.collection)} Sevlings collection</p>
     </div>`;
   }
-  return `<div class="card"><p class="muted" style="text-align:center;margin:0;">${sevlingsProgressLine(practiceLangOf(p.mode))}</p></div>`;
+  const listMeta = state.lists.find(l=>l.id===p.listId);
+  return `<div class="card"><p class="muted" style="text-align:center;margin:0;">${sevlingsProgressLine(p.listId, listMeta && listMeta.label)}</p></div>`;
 }
 function rewardBlockHtml(p){
   if(!p.reward) return `<div class="card"><p class="muted" style="text-align:center;margin:0;">No reward this time, get 4 or fewer wrong next time to win one.</p></div>`;
@@ -1357,6 +1385,20 @@ function rewardBlockHtml(p){
     inner = `<div class="reward-icon">${icons[r.type]}</div><div class="reward-name">${names[r.type]}</div><div class="reward-value">+\u00A3${r.value}</div>`;
   }
   return `<div class="card reward-card">${inner}</div>`;
+}
+function arcadeProgressHtml(p){
+  if(p.arcadeUnlocked){
+    return `<div class="card reward-card" style="border-top-color:var(--blue);">
+      <div class="reward-icon">\uD83C\uDFAE</div>
+      <div class="reward-name">5 minutes of arcade games unlocked!</div>
+      <p class="muted" style="margin:0.2rem 0 0 0;">Play Connect 4 or Snake from the Arcade tab.</p>
+    </div>`;
+  }
+  if((p.pct||0) < 90) return '';
+  const remaining = Math.max(0, 3 - ((game.gameUnlockStreaks && game.gameUnlockStreaks[p.listId]) || 0));
+  if(remaining<=0) return '';
+  const listMeta = state.lists.find(l=>l.id===p.listId);
+  return `<div class="card"><p class="muted" style="text-align:center;margin:0;">${remaining} more 90%+ test${remaining===1?'':'s'} with "${escapeHtml(listMeta?listMeta.label:'this list')}" to unlock 5 minutes of arcade games!</p></div>`;
 }
 function renderResults(){
   const p = state.practice;
@@ -1374,6 +1416,7 @@ function renderResults(){
     </div>
     ${p.isRetry ? '' : rewardBlockHtml(p)}
     ${p.isRetry ? '' : sevlingProgressHtml(p)}
+    ${p.isRetry ? '' : arcadeProgressHtml(p)}
     ${p.wrong.length ? `
       <h3 class="section-title">Words to look at again</h3>
       <div class="card">${p.wrong.map(w=>`<div class="missed-row"><span>${escapeHtml(w.spanish)}</span><span class="muted">${escapeHtml(w.english)}</span></div>`).join('')}</div>
@@ -1386,7 +1429,7 @@ function renderResults(){
   `;
   if(p.wrong.length){
     document.getElementById('btn-retry').onclick = ()=>{
-      state.practice = { mode: p.mode, words: shuffle(p.wrong), index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:true, reward:null, trophyVariant:null, newSevling:null, wordHidden:false, wordRevealed:false };
+      state.practice = { mode: p.mode, listId: p.listId, words: shuffle(p.wrong), index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:true, reward:null, trophyVariant:null, newSevling:null, wordHidden:false, wordRevealed:false };
       state.view='practice'; render();
     };
   }
@@ -1439,12 +1482,14 @@ function renderTrophies(){
 }
 function renderSevlings(){
   const unlockedCount = game.unlockedSevlings.length;
+  const streaks = game.listStreaks || {};
+  const inProgress = state.lists.filter(l=>(streaks[l.id]||0) > 0);
   app.innerHTML = `
     ${navRow('sevlings')}
     <h2 class="section-title">Sevlings</h2>
-    <p class="muted">You've found ${unlockedCount} of ${SEVLINGS.length} Sevlings. Win a new one for every ${game.streakGoal||4} fully correct practices in a row, in either language, roughly every few weeks. Spanish and English progress are tracked separately, so they don't add together.</p>
-    <div class="card"><p class="muted" style="text-align:center;margin:0;"><strong>Spanish:</strong> ${sevlingsProgressLine('es')}</p></div>
-    <div class="card"><p class="muted" style="text-align:center;margin:0;"><strong>English:</strong> ${sevlingsProgressLine('en')}</p></div>
+    <p class="muted">You've found ${unlockedCount} of ${SEVLINGS.length} Sevlings. Win a new one for every ${game.streakGoal||4} fully correct practices in a row with the *same* word list, roughly every few weeks. Progress is per list, so switching between lists doesn't add up, sticking with one list is what gets you there.</p>
+    ${inProgress.length ? inProgress.map(l=>`<div class="card"><p class="muted" style="text-align:center;margin:0;"><strong>${escapeHtml(l.label)}</strong> (${l.lang==='en'?'English':'Spanish'}): ${sevlingsProgressLine(l.id, l.label)}</p></div>`).join('')
+      : `<div class="card"><p class="muted" style="text-align:center;margin:0;">Pick a list and practise it a few times in a row, fully correct, to start winning Sevlings!</p></div>`}
     ${COLLECTIONS.map(([id,label])=>`
       <h3 class="section-title" style="margin-top:1.2rem;">${label}</h3>
       <div class="shop-grid">${SEVLINGS.filter(s=>s.collection===id).map(sevlingTile).join('')}</div>
@@ -1508,6 +1553,275 @@ function voiceOptionsHtml(voices, prefix, selectedName){
   if(!matches.length) return base + `<option value="" disabled>No ${label} voices found on this device yet</option>`;
   return base + matches.map(v=>`<option value="${encodeURIComponent(v.name)}|${encodeURIComponent(v.lang)}" ${selectedName===v.name?'selected':''}>${escapeHtml(v.name)} (${escapeHtml(v.lang)})</option>`).join('');
 }
+// ---------- Arcade ----------
+let arcadeTickInterval = null;
+let snakeLoopInterval = null;
+function stopAllArcadeIntervals(){
+  if(arcadeTickInterval){ clearInterval(arcadeTickInterval); arcadeTickInterval = null; }
+  if(snakeLoopInterval){ clearInterval(snakeLoopInterval); snakeLoopInterval = null; }
+}
+function formatMs(ms){
+  const totalSec = Math.max(0, Math.ceil(ms/1000));
+  const m = Math.floor(totalSec/60), s = totalSec%60;
+  return `${m}:${s<10?'0':''}${s}`;
+}
+function startArcadeCountdown(onExpire){
+  if(arcadeTickInterval) return;
+  let saveCounter = 0;
+  arcadeTickInterval = setInterval(async ()=>{
+    game.arcadeMs = Math.max(0, (game.arcadeMs||0) - 1000);
+    const el = document.getElementById('arcade-timer');
+    if(el) el.textContent = formatMs(game.arcadeMs);
+    saveCounter++;
+    if(saveCounter>=10){ saveCounter=0; await saveGame(); }
+    if(game.arcadeMs<=0){
+      clearInterval(arcadeTickInterval); arcadeTickInterval = null;
+      await saveGame();
+      onExpire();
+    }
+  }, 1000);
+}
+function renderArcade(){
+  const hasTime = (game.arcadeMs||0) > 0;
+  const won = game.unlockedSevlings.map(id=>SEVLINGS.find(s=>s.id===id)).filter(Boolean);
+  const snakeOptions = won.length
+    ? `<option value="">Classic snake (no face)</option>` + won.map(s=>`<option value="${s.id}" ${game.selectedSnakeSevling===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')
+    : `<option value="">No Sevlings to select yet</option>`;
+  const c4Options = won.length
+    ? `<option value="">Plain counter</option>` + won.map(s=>`<option value="${s.id}" ${game.selectedConnect4Sevling===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')
+    : `<option value="">No Sevlings to select yet</option>`;
+  app.innerHTML = `
+    ${navRow('arcade')}
+    <h2 class="section-title">Arcade</h2>
+    <div class="card" style="text-align:center;">
+      <div class="score-big">${formatMs(game.arcadeMs||0)}</div>
+      <p class="muted" style="margin:0;">${hasTime ? 'Arcade time ready to play' : 'No arcade time yet'}</p>
+    </div>
+    ${!hasTime ? `<div class="card"><p class="muted" style="text-align:center;margin:0;">Score 90%+ three times in a row on the same word list to earn 5 minutes of arcade time.</p></div>` : ''}
+    <div class="card">
+      <h3 style="margin-top:0;">Connect 4</h3>
+      <p class="muted">Play against a Sevling.</p>
+      <label class="muted" style="display:block;margin-bottom:0.2rem;">Opponent</label>
+      <select id="c4-sevling" ${won.length?'':'disabled'}>${c4Options}</select>
+      <button class="btn-primary btn-block" id="btn-play-c4" ${hasTime?'':'disabled'}>Play Connect 4</button>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">Snake</h3>
+      <p class="muted">Guide your Sevling to the food.</p>
+      <label class="muted" style="display:block;margin-bottom:0.2rem;">Choose your Sevling</label>
+      <select id="snake-sevling" ${won.length?'':'disabled'}>${snakeOptions}</select>
+      <button class="btn-primary btn-block" id="btn-play-snake" ${hasTime?'':'disabled'}>Play Snake</button>
+    </div>
+  `;
+  document.getElementById('btn-play-c4').onclick = async ()=>{
+    game.selectedConnect4Sevling = document.getElementById('c4-sevling').value || null;
+    await saveGame();
+    state.c4 = newConnect4();
+    state.view = 'arcade-connect4'; render();
+  };
+  document.getElementById('btn-play-snake').onclick = async ()=>{
+    game.selectedSnakeSevling = document.getElementById('snake-sevling').value || null;
+    await saveGame();
+    state.snake = newSnake();
+    state.view = 'arcade-snake'; render();
+  };
+}
+
+// ---- Connect 4 ----
+function newConnect4(){ return { board: Array.from({length:7}, ()=>[]), turn:1, over:false, winner:null, winCells:[] }; }
+function c4ValidCols(board){ const out=[]; for(let c=0;c<7;c++) if(board[c].length<6) out.push(c); return out; }
+function c4DropRow(board,col){ return board[col].length; }
+function c4CheckWin(board,col,row,player){
+  const dirs = [[1,0],[0,1],[1,1],[1,-1]];
+  for(const [dx,dy] of dirs){
+    let cells = [[col,row]];
+    let c=col+dx, r=row+dy;
+    while(c>=0&&c<7&&r>=0&&r<6&&board[c][r]===player){ cells.push([c,r]); c+=dx; r+=dy; }
+    c=col-dx; r=row-dy;
+    while(c>=0&&c<7&&r>=0&&r<6&&board[c][r]===player){ cells.push([c,r]); c-=dx; r-=dy; }
+    if(cells.length>=4) return cells;
+  }
+  return null;
+}
+function c4WouldWin(board,col,player){
+  if(board[col].length>=6) return false;
+  const row = c4DropRow(board,col);
+  board[col].push(player);
+  const win = c4CheckWin(board,col,row,player);
+  board[col].pop();
+  return !!win;
+}
+function c4AiMove(board){
+  const valid = c4ValidCols(board);
+  for(const c of valid) if(c4WouldWin(board,c,2)) return c;
+  for(const c of valid) if(c4WouldWin(board,c,1)) return c;
+  const weights = valid.map(c=>4-Math.abs(c-3));
+  const total = weights.reduce((a,b)=>a+b,0);
+  let r = Math.random()*total;
+  for(let i=0;i<valid.length;i++){ r-=weights[i]; if(r<=0) return valid[i]; }
+  return valid[valid.length-1];
+}
+function renderConnect4(){
+  if(!state.c4) state.c4 = newConnect4();
+  const c4 = state.c4;
+  const oppId = game.selectedConnect4Sevling;
+  const oppSevling = oppId ? SEVLINGS.find(s=>s.id===oppId) : null;
+  const hasTime = (game.arcadeMs||0) > 0;
+  let statusText;
+  if(c4.over) statusText = c4.winner===1 ? 'You win! \uD83C\uDF89' : (c4.winner===2 ? 'The Sevling wins!' : "It's a draw!");
+  else statusText = c4.turn===1 ? 'Your turn' : 'Thinking\u2026';
+  let boardHtml = '';
+  for(let rowFromTop=0; rowFromTop<6; rowFromTop++){
+    const row = 5-rowFromTop;
+    for(let col=0; col<7; col++){
+      const val = c4.board[col][row];
+      const isWin = c4.winCells.some(([cc,rr])=>cc===col&&rr===row);
+      let inner = '';
+      if(val===1) inner = `<div style="width:100%;height:100%;border-radius:50%;background:var(--pink);border:2px solid var(--ink);"></div>`;
+      else if(val===2) inner = oppSevling ? sevlingIcon(oppSevling,false) : `<div style="width:100%;height:100%;border-radius:50%;background:var(--blue);border:2px solid var(--ink);"></div>`;
+      boardHtml += `<div class="c4-cell" data-col="${col}" style="width:40px;height:40px;background:#fff;border:2px solid var(--ink);border-radius:50%;overflow:hidden;${isWin?'box-shadow:0 0 0 3px var(--gold) inset;':''}cursor:pointer;">${inner}</div>`;
+    }
+  }
+  app.innerHTML = `
+    <button class="btn-ghost" id="btn-back-arcade">\u2190 Back to Arcade</button>
+    <h2 class="section-title">Connect 4</h2>
+    <p class="progress" style="text-align:center;">Arcade time left: <span id="arcade-timer">${formatMs(game.arcadeMs||0)}</span></p>
+    <div class="card">
+      <p class="muted" style="text-align:center;margin:0 0 0.6rem 0;">${statusText}</p>
+      ${(!hasTime) ? `<p class="muted" style="text-align:center;font-size:0.85rem;margin:0 0 0.6rem 0;">${c4.over ? 'Out of arcade time, score 90%+ three times on a list to earn more!' : "Your arcade time has run out, but you can finish this game."}</p>` : ''}
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;max-width:320px;margin:0 auto;">${boardHtml}</div>
+    </div>
+    <div class="btn-row" style="margin-top:1rem;justify-content:center;">
+      <button class="btn-secondary" id="btn-c4-restart" ${hasTime?'':'disabled'}>New game</button>
+    </div>
+  `;
+  document.getElementById('btn-back-arcade').onclick = ()=>{ stopAllArcadeIntervals(); state.view='arcade'; render(); };
+  document.getElementById('btn-c4-restart').onclick = ()=>{ if((game.arcadeMs||0)<=0) return; state.c4 = newConnect4(); render(); };
+  if(!c4.over){
+    document.querySelectorAll('.c4-cell').forEach(cell=>{ cell.onclick = ()=>c4PlayerMove(+cell.dataset.col); });
+    if(hasTime) startArcadeCountdown(()=>render());
+  }else{
+    stopAllArcadeIntervals();
+  }
+}
+function c4PlayerMove(col){
+  const c4 = state.c4;
+  if(!c4 || c4.over || c4.turn!==1 || c4.board[col].length>=6) return;
+  const row = c4DropRow(c4.board,col);
+  c4.board[col].push(1);
+  const win = c4CheckWin(c4.board,col,row,1);
+  if(win){ c4.over=true; c4.winner=1; c4.winCells=win; render(); return; }
+  if(c4ValidCols(c4.board).length===0){ c4.over=true; c4.winner='draw'; render(); return; }
+  c4.turn = 2;
+  render();
+  setTimeout(()=>{
+    if(!state.c4 || state.c4!==c4 || c4.over) return;
+    const aiCol = c4AiMove(c4.board);
+    const aiRow = c4DropRow(c4.board,aiCol);
+    c4.board[aiCol].push(2);
+    const aiWin = c4CheckWin(c4.board,aiCol,aiRow,2);
+    if(aiWin){ c4.over=true; c4.winner=2; c4.winCells=aiWin; }
+    else if(c4ValidCols(c4.board).length===0){ c4.over=true; c4.winner='draw'; }
+    else c4.turn=1;
+    render();
+  }, 500);
+}
+
+// ---- Snake ----
+function newSnake(){
+  return { size:12, snake:[{x:6,y:6},{x:5,y:6},{x:4,y:6}], dir:{x:1,y:0}, nextDir:{x:1,y:0}, food:{x:9,y:6}, score:0, over:false };
+}
+function snakeRandomFood(s){
+  let pos;
+  do{ pos = { x:Math.floor(Math.random()*s.size), y:Math.floor(Math.random()*s.size) }; }
+  while(s.snake.some(seg=>seg.x===pos.x&&seg.y===pos.y));
+  return pos;
+}
+function snakeTick(s){
+  if(s.over) return;
+  s.dir = s.nextDir;
+  const head = { x: s.snake[0].x + s.dir.x, y: s.snake[0].y + s.dir.y };
+  if(head.x<0||head.x>=s.size||head.y<0||head.y>=s.size || s.snake.some(seg=>seg.x===head.x&&seg.y===head.y)){
+    s.over = true; return;
+  }
+  s.snake.unshift(head);
+  if(head.x===s.food.x && head.y===s.food.y){ s.score++; s.food = snakeRandomFood(s); }
+  else s.snake.pop();
+}
+function snakeSetDir(s,dx,dy){
+  if(!s || s.over) return;
+  if(s.dir.x===-dx && s.dir.y===-dy) return;
+  s.nextDir = {x:dx,y:dy};
+}
+function startSnakeLoop(){
+  if(snakeLoopInterval) return;
+  snakeLoopInterval = setInterval(()=>{
+    const s = state.snake;
+    if(!s || s.over){
+      clearInterval(snakeLoopInterval); snakeLoopInterval = null;
+      render();
+      return;
+    }
+    snakeTick(s);
+    render();
+  }, 220);
+}
+function renderSnakeGame(){
+  if(!state.snake) state.snake = newSnake();
+  const s = state.snake;
+  const headId = game.selectedSnakeSevling;
+  const headSevling = headId ? SEVLINGS.find(x=>x.id===headId) : null;
+  const hasTime = (game.arcadeMs||0) > 0;
+  const cellPct = 100/s.size;
+  let cellsHtml = '';
+  for(let y=0;y<s.size;y++){
+    for(let x=0;x<s.size;x++){
+      const segIdx = s.snake.findIndex(seg=>seg.x===x&&seg.y===y);
+      const isFood = s.food.x===x && s.food.y===y;
+      let content = '';
+      const style = `position:absolute;left:${x*cellPct}%;top:${y*cellPct}%;width:${cellPct}%;height:${cellPct}%;box-sizing:border-box;padding:1px;`;
+      if(segIdx===0){
+        content = headSevling ? `<div style="width:100%;height:100%;">${sevlingIcon(headSevling,false)}</div>` : `<div style="width:100%;height:100%;background:var(--correct);border-radius:4px;"></div>`;
+      }else if(segIdx>-1){
+        content = `<div style="width:100%;height:100%;background:var(--correct);opacity:0.7;border-radius:3px;"></div>`;
+      }else if(isFood){
+        content = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:14px;">\uD83C\uDF4E</div>`;
+      }
+      cellsHtml += `<div style="${style}">${content}</div>`;
+    }
+  }
+  app.innerHTML = `
+    <button class="btn-ghost" id="btn-back-arcade">\u2190 Back to Arcade</button>
+    <h2 class="section-title">Snake</h2>
+    <p class="progress" style="text-align:center;">Score: ${s.score} &nbsp;\u00B7&nbsp; Arcade time left: <span id="arcade-timer">${formatMs(game.arcadeMs||0)}</span></p>
+    ${(s.over) ? `<div class="card"><p class="muted" style="text-align:center;margin:0;">Game over! Final score: ${s.score}</p></div>` : ''}
+    ${(!hasTime) ? `<div class="card"><p class="muted" style="text-align:center;font-size:0.85rem;margin:0;">${s.over ? 'Out of arcade time, score 90%+ three times on a list to earn more!' : 'Your arcade time has run out, but you can finish this game.'}</p></div>` : ''}
+    <div class="card">
+      <div style="position:relative;width:300px;height:300px;max-width:100%;margin:0 auto;background:var(--bg);border:2px solid var(--ink);border-radius:12px;overflow:hidden;">${cellsHtml}</div>
+    </div>
+    <div style="max-width:190px;margin:1rem auto 0;display:grid;grid-template-columns:repeat(3,1fr);gap:0.4rem;">
+      <div></div><button class="btn-secondary" id="snake-up">\u2191</button><div></div>
+      <button class="btn-secondary" id="snake-left">\u2190</button><div></div><button class="btn-secondary" id="snake-right">\u2192</button>
+      <div></div><button class="btn-secondary" id="snake-down">\u2193</button><div></div>
+    </div>
+    <div class="btn-row" style="margin-top:1rem;justify-content:center;">
+      <button class="btn-secondary" id="btn-snake-restart" ${hasTime?'':'disabled'}>New game</button>
+    </div>
+  `;
+  document.getElementById('btn-back-arcade').onclick = ()=>{ stopAllArcadeIntervals(); state.view='arcade'; render(); };
+  document.getElementById('btn-snake-restart').onclick = ()=>{ if((game.arcadeMs||0)<=0) return; stopAllArcadeIntervals(); state.snake = newSnake(); render(); };
+  document.getElementById('snake-up').onclick = ()=>snakeSetDir(state.snake,0,-1);
+  document.getElementById('snake-down').onclick = ()=>snakeSetDir(state.snake,0,1);
+  document.getElementById('snake-left').onclick = ()=>snakeSetDir(state.snake,-1,0);
+  document.getElementById('snake-right').onclick = ()=>snakeSetDir(state.snake,1,0);
+  if(!s.over){
+    startSnakeLoop();
+    if(hasTime) startArcadeCountdown(()=>render());
+  }else{
+    stopAllArcadeIntervals();
+  }
+}
+
 function renderSettings(){
   const connected = !!db;
   if(!cachedVoices.length && 'speechSynthesis' in window){
@@ -1542,6 +1856,17 @@ function renderSettings(){
       <input type="text" id="invite-code" placeholder="Invite code" value="${escapeHtml(settings.inviteCode||'')}" ${authUser ? '' : 'disabled'}>
     </div>
 
+    ${(authUser && state.currentProfileId) ? `
+    <div class="card">
+      <h3 style="margin-top:0;">Testing tools</h3>
+      <p class="muted">For trying out and refining the Arcade games without waiting to earn access for real. Only affects this profile.</p>
+      <div class="btn-row">
+        <button class="btn-secondary" id="btn-add-arcade-time">Add 30 min arcade time</button>
+        <button class="btn-secondary" id="btn-unlock-test-sevling">Unlock random Sevling</button>
+      </div>
+    </div>
+    ` : ''}
+
     <div class="card">
       <h3 style="margin-top:0;">Sync and accounts (Firebase)</h3>
       <p class="muted">In the Firebase console: create a free project, add a Web app, turn on Firestore Database, and turn on Email/Password sign-in under Authentication. Paste the whole firebaseConfig snippet below.</p>
@@ -1552,7 +1877,28 @@ function renderSettings(){
     <div class="btn-row">
       <button class="btn-primary" id="btn-save-settings">Save settings</button>
     </div>
+    ${authUser ? `<button class="btn-secondary btn-block" id="btn-settings-back" style="margin-top:0.6rem;">${state.currentProfileId ? '\u2190 Back to Home' : '\u2190 Back to profiles'}</button>` : ''}
   `;
+  const backBtn = document.getElementById('btn-settings-back');
+  if(backBtn) backBtn.onclick = ()=>{ state.view = state.currentProfileId ? 'home' : 'profiles'; render(); };
+  const addTimeBtn = document.getElementById('btn-add-arcade-time');
+  if(addTimeBtn) addTimeBtn.onclick = async ()=>{
+    game.arcadeMs = (game.arcadeMs||0) + 30*60*1000;
+    await saveGame();
+    state.settingsMessage = 'Added 30 minutes of arcade time.';
+    render();
+  };
+  const unlockTestBtn = document.getElementById('btn-unlock-test-sevling');
+  if(unlockTestBtn) unlockTestBtn.onclick = async ()=>{
+    const locked = SEVLINGS.filter(s=>!game.unlockedSevlings.includes(s.id));
+    if(!locked.length){ state.settingsMessage = 'All Sevlings are already unlocked.'; render(); return; }
+    const won = locked[Math.floor(Math.random()*locked.length)];
+    game.unlockedSevlings.push(won.id);
+    game.sevlingCare[won.id] = { happiness:50, accessories:[] };
+    await saveGame();
+    state.settingsMessage = `Unlocked ${won.name} for testing.`;
+    render();
+  };
   document.getElementById('btn-save-settings').onclick = async ()=>{
     const geminiVal = document.getElementById('gemini-key').value.trim();
     const cfgText = document.getElementById('firebase-config').value.trim();
