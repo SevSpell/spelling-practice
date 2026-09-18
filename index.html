@@ -229,11 +229,11 @@ const state = {
   view: 'settings', lists: [], currentListId: null,
   uploadImageB64: null, uploadImagePreview: null, extractedWords: [], listLabelDraft: '',
   busy: false, error: '', settingsMessage: '', firebaseConfigDraft: '', currentSevlingId: null, authMode: 'signin', practiceLang: 'es',
-  profiles: [], currentProfileId: null, addProfileMode: 'new', c4: null, snake: null,
+  profiles: [], currentProfileId: null, addProfileMode: 'new', c4: null, snake: null, maze: null,
   practice: { mode:null, words:[], index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:false, reward:null, trophyVariant:null, newSevling:null }
 };
 
-function emptyGameState(){ return { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, listStreaks:{}, streakGoal:4, lastSevlingAt:null, cooldownDays:14, arcadeMs:0, gameUnlockStreaks:{}, selectedSnakeSevling:null, selectedConnect4Sevling:null }; }
+function emptyGameState(){ return { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, listStreaks:{}, streakGoal:4, lastSevlingAt:null, cooldownDays:14, arcadeMs:0, gameUnlockStreaks:{}, selectedSnakeSevling:null, selectedConnect4Sevling:null, selectedMazeSevling:null }; }
 let game = emptyGameState();
 let settings = { firebaseConfig:null };
 let fbApp = null, db = null, auth = null, authUser = null;
@@ -670,6 +670,7 @@ function render(){
   else if(state.view==='arcade') renderArcade();
   else if(state.view==='arcade-connect4') renderConnect4();
   else if(state.view==='arcade-snake') renderSnakeGame();
+  else if(state.view==='arcade-maze') renderMazeGame();
   else if(state.view==='settings') renderSettings();
   wireSpeakButtons(); wireNav(); refreshBadge();
 }
@@ -1556,9 +1557,11 @@ function voiceOptionsHtml(voices, prefix, selectedName){
 // ---------- Arcade ----------
 let arcadeTickInterval = null;
 let snakeLoopInterval = null;
+let mazeLoopInterval = null;
 function stopAllArcadeIntervals(){
   if(arcadeTickInterval){ clearInterval(arcadeTickInterval); arcadeTickInterval = null; }
   if(snakeLoopInterval){ clearInterval(snakeLoopInterval); snakeLoopInterval = null; }
+  if(mazeLoopInterval){ clearInterval(mazeLoopInterval); mazeLoopInterval = null; }
 }
 function formatMs(ms){
   const totalSec = Math.max(0, Math.ceil(ms/1000));
@@ -1590,6 +1593,9 @@ function renderArcade(){
   const c4Options = won.length
     ? `<option value="">Blank (no Sevling)</option>` + won.map(s=>`<option value="${s.id}" ${game.selectedConnect4Sevling===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')
     : `<option value="">No Sevlings to select yet</option>`;
+  const mazeOptions = won.length
+    ? `<option value="">Classic muncher (no face)</option>` + won.map(s=>`<option value="${s.id}" ${game.selectedMazeSevling===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')
+    : `<option value="">No Sevlings to select yet</option>`;
   app.innerHTML = `
     ${navRow('arcade')}
     <h2 class="section-title">Arcade</h2>
@@ -1612,6 +1618,13 @@ function renderArcade(){
       <select id="snake-sevling" ${won.length?'':'disabled'}>${snakeOptions}</select>
       <button class="btn-primary btn-block" id="btn-play-snake" ${hasTime?'':'disabled'}>Play Snake</button>
     </div>
+    <div class="card">
+      <h3 style="margin-top:0;">Maze Munch</h3>
+      <p class="muted">Gobble every dot in the maze while dodging the baddies.</p>
+      <label class="muted" style="display:block;margin-bottom:0.2rem;">Choose your muncher</label>
+      <select id="maze-sevling" ${won.length?'':'disabled'}>${mazeOptions}</select>
+      <button class="btn-primary btn-block" id="btn-play-maze" ${hasTime?'':'disabled'}>Play Maze Munch</button>
+    </div>
   `;
   document.getElementById('btn-play-c4').onclick = async ()=>{
     game.selectedConnect4Sevling = document.getElementById('c4-sevling').value || null;
@@ -1624,6 +1637,12 @@ function renderArcade(){
     await saveGame();
     state.snake = newSnake();
     state.view = 'arcade-snake'; render();
+  };
+  document.getElementById('btn-play-maze').onclick = async ()=>{
+    game.selectedMazeSevling = document.getElementById('maze-sevling').value || null;
+    await saveGame();
+    state.maze = newMaze();
+    state.view = 'arcade-maze'; render();
   };
 }
 
@@ -1678,7 +1697,7 @@ function renderConnect4(){
       const isWin = c4.winCells.some(([cc,rr])=>cc===col&&rr===row);
       let inner = '';
       if(val===1) inner = `<div style="width:100%;height:100%;border-radius:50%;background:var(--pink);border:2px solid var(--ink);"></div>`;
-      else if(val===2) inner = oppSevling ? sevlingIcon(oppSevling,false) : `<div style="width:100%;height:100%;border-radius:50%;background:var(--blue);border:2px solid var(--ink);"></div>`;
+      else if(val===2) inner = `<div style="width:100%;height:100%;border-radius:50%;background:var(--blue);border:2px solid var(--ink);overflow:hidden;box-sizing:border-box;">${oppSevling ? sevlingIcon(oppSevling,false) : ''}</div>`;
       boardHtml += `<div class="c4-cell" data-col="${col}" style="width:40px;height:40px;background:#fff;border:2px solid var(--ink);border-radius:50%;overflow:hidden;${isWin?'box-shadow:0 0 0 3px var(--gold) inset;':''}cursor:pointer;">${inner}</div>`;
     }
   }
@@ -1764,7 +1783,7 @@ function startSnakeLoop(){
     }
     snakeTick(s);
     render();
-  }, 150);
+  }, 190);
 }
 function renderSnakeGame(){
   if(!state.snake) state.snake = newSnake();
@@ -1781,7 +1800,8 @@ function renderSnakeGame(){
       let content = '';
       const style = `position:absolute;left:${x*cellPct}%;top:${y*cellPct}%;width:${cellPct}%;height:${cellPct}%;box-sizing:border-box;padding:1px;`;
       if(segIdx===0){
-        content = headSevling ? `<div style="width:100%;height:100%;">${sevlingIcon(headSevling,false)}</div>` : `<div style="width:100%;height:100%;background:var(--correct);border-radius:4px;"></div>`;
+        const headInner = headSevling ? sevlingIcon(headSevling,false) : `<div style="width:100%;height:100%;background:var(--correct);border-radius:4px;"></div>`;
+        content = `<div style="position:absolute;left:50%;top:50%;width:145%;height:145%;transform:translate(-50%,-50%);border-radius:50%;border:3px solid var(--correct);overflow:hidden;box-sizing:border-box;background:#fff;z-index:2;">${headInner}</div>`;
       }else if(segIdx>-1){
         content = `<div style="width:100%;height:100%;background:var(--correct);opacity:0.7;border-radius:3px;"></div>`;
       }else if(isFood){
@@ -1796,8 +1816,8 @@ function renderSnakeGame(){
     <p class="progress" style="text-align:center;">Score: ${s.score} &nbsp;\u00B7&nbsp; Arcade time left: <span id="arcade-timer">${formatMs(game.arcadeMs||0)}</span></p>
     ${(s.over) ? `<div class="card"><p class="muted" style="text-align:center;margin:0;">Game over! Final score: ${s.score}</p></div>` : ''}
     ${(!hasTime) ? `<div class="card"><p class="muted" style="text-align:center;font-size:0.85rem;margin:0;">${s.over ? 'Out of arcade time, score 90%+ three times on a list to earn more!' : 'Your arcade time has run out, but you can finish this game.'}</p></div>` : ''}
-    <div class="card">
-      <div style="width:100%;max-width:380px;margin:0 auto;position:relative;">
+    <div class="card" style="padding:0.5rem;">
+      <div style="width:100%;max-width:420px;margin:0 auto;position:relative;">
         <div style="padding-bottom:100%;"></div>
         <div style="position:absolute;top:0;left:0;right:0;bottom:0;background:var(--bg);border:2px solid var(--ink);border-radius:12px;overflow:hidden;">${cellsHtml}</div>
       </div>
@@ -1819,6 +1839,139 @@ function renderSnakeGame(){
   document.getElementById('snake-right').onclick = ()=>snakeSetDir(state.snake,1,0);
   if(!s.over){
     startSnakeLoop();
+    if(hasTime) startArcadeCountdown(()=>render());
+  }else{
+    stopAllArcadeIntervals();
+  }
+}
+
+// ---- Maze Munch ----
+// An original maze-chase game (dots, a maze, chasing enemies), not a reproduction of any
+// licensed character art, generic shapes and colours throughout by design.
+const MAZE_TEMPLATE = [
+  "###############",
+  "#.............#",
+  "#.##.#####.##.#",
+  "#.............#",
+  "#.##.#.#.#.##.#",
+  "#.............#",
+  "#.##.#.#.#.##.#",
+  "#.............#",
+  "#.##.#####.##.#",
+  "#.............#",
+  "###############"
+];
+const MAZE_COLS = MAZE_TEMPLATE[0].length;
+const MAZE_ROWS = MAZE_TEMPLATE.length;
+function mazeCellAt(grid,x,y){ if(y<0||y>=MAZE_ROWS||x<0||x>=MAZE_COLS) return 0; return grid[y][x]; }
+function mazeCanMove(grid,x,y){ return mazeCellAt(grid,x,y)!==0; }
+function newMaze(){
+  const grid = MAZE_TEMPLATE.map(row=>row.split('').map(ch=>ch==='#'?0:1));
+  grid[5][7] = 2;
+  const dotsLeft = grid.reduce((sum,row)=>sum+row.filter(c=>c===1).length,0);
+  return {
+    grid, player:{x:7,y:5}, dir:{x:0,y:0}, nextDir:{x:0,y:0},
+    ghosts: [
+      { x:1, y:1, color:'var(--wrong)', dir:{x:1,y:0} },
+      { x:13, y:1, color:'var(--blue)', dir:{x:-1,y:0} },
+      { x:1, y:9, color:'var(--gold)', dir:{x:1,y:0} },
+      { x:13, y:9, color:'var(--pink)', dir:{x:-1,y:0} }
+    ],
+    dotsLeft, score:0, over:false, won:false, tick:0
+  };
+}
+function mazeSetDir(m,dx,dy){ if(!m || m.over) return; m.nextDir = {x:dx,y:dy}; }
+function mazeTick(m){
+  if(m.over) return;
+  m.tick++;
+  if(mazeCanMove(m.grid, m.player.x+m.nextDir.x, m.player.y+m.nextDir.y)) m.dir = m.nextDir;
+  const px = m.player.x+m.dir.x, py = m.player.y+m.dir.y;
+  if(mazeCanMove(m.grid,px,py)){ m.player.x = px; m.player.y = py; }
+  if(m.grid[m.player.y][m.player.x]===1){
+    m.grid[m.player.y][m.player.x] = 2; m.score++; m.dotsLeft--;
+    if(m.dotsLeft<=0){ m.won = true; m.over = true; return; }
+  }
+  if(m.ghosts.some(g=>g.x===m.player.x && g.y===m.player.y)){ m.over = true; m.won = false; return; }
+  if(m.tick % 2 === 0){
+    const dirs = [{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
+    m.ghosts.forEach(g=>{
+      let candidates = dirs.filter(d=> mazeCanMove(m.grid,g.x+d.x,g.y+d.y) && !(d.x===-g.dir.x && d.y===-g.dir.y));
+      if(!candidates.length) candidates = dirs.filter(d=>mazeCanMove(m.grid,g.x+d.x,g.y+d.y));
+      if(!candidates.length) return;
+      let choice;
+      if(Math.random()<0.2){
+        choice = candidates[Math.floor(Math.random()*candidates.length)];
+      }else{
+        choice = candidates.reduce((best,d)=>{
+          const nx=g.x+d.x, ny=g.y+d.y;
+          const dist = (nx-m.player.x)**2 + (ny-m.player.y)**2;
+          return (!best || dist<best.dist) ? {d,dist} : best;
+        }, null).d;
+      }
+      g.dir = choice; g.x += choice.x; g.y += choice.y;
+    });
+    if(m.ghosts.some(g=>g.x===m.player.x && g.y===m.player.y)){ m.over = true; m.won = false; }
+  }
+}
+function startMazeLoop(){
+  if(mazeLoopInterval) return;
+  mazeLoopInterval = setInterval(()=>{
+    const m = state.maze;
+    if(!m || m.over){ clearInterval(mazeLoopInterval); mazeLoopInterval = null; render(); return; }
+    mazeTick(m);
+    render();
+  }, 200);
+}
+function renderMazeGame(){
+  if(!state.maze) state.maze = newMaze();
+  const m = state.maze;
+  const charId = game.selectedMazeSevling;
+  const charSevling = charId ? SEVLINGS.find(x=>x.id===charId) : null;
+  const hasTime = (game.arcadeMs||0) > 0;
+  const cellPctX = 100/MAZE_COLS, cellPctY = 100/MAZE_ROWS;
+  let cellsHtml = '';
+  for(let y=0;y<MAZE_ROWS;y++){
+    for(let x=0;x<MAZE_COLS;x++){
+      const cellVal = m.grid[y][x];
+      const style = `position:absolute;left:${x*cellPctX}%;top:${y*cellPctY}%;width:${cellPctX}%;height:${cellPctY}%;box-sizing:border-box;`;
+      let content = '';
+      if(cellVal===0) content = `<div style="width:100%;height:100%;background:var(--ink);"></div>`;
+      else if(cellVal===1) content = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;"><div style="width:22%;height:22%;border-radius:50%;background:var(--gold);"></div></div>`;
+      cellsHtml += `<div style="${style}">${content}</div>`;
+    }
+  }
+  const playerInner = charSevling ? sevlingIcon(charSevling,false) : `<div style="width:100%;height:100%;border-radius:50%;background:#FFD447;"></div>`;
+  const playerHtml = `<div style="position:absolute;left:${m.player.x*cellPctX}%;top:${m.player.y*cellPctY}%;width:${cellPctX}%;height:${cellPctY}%;box-sizing:border-box;padding:1px;z-index:3;"><div style="width:100%;height:100%;border-radius:50%;overflow:hidden;background:#fff;">${playerInner}</div></div>`;
+  const ghostsHtml = m.ghosts.map(g=>`<div style="position:absolute;left:${g.x*cellPctX}%;top:${g.y*cellPctY}%;width:${cellPctX}%;height:${cellPctY}%;box-sizing:border-box;padding:1px;z-index:2;"><div style="width:100%;height:100%;border-radius:50% 50% 15% 15%;background:${g.color};position:relative;"><div style="position:absolute;left:22%;top:30%;width:16%;height:16%;border-radius:50%;background:#fff;"></div><div style="position:absolute;left:60%;top:30%;width:16%;height:16%;border-radius:50%;background:#fff;"></div></div></div>`).join('');
+  app.innerHTML = `
+    <button class="btn-ghost" id="btn-back-arcade">\u2190 Back to Arcade</button>
+    <h2 class="section-title">Maze Munch</h2>
+    <p class="progress" style="text-align:center;">Dots left: ${m.dotsLeft} &nbsp;\u00B7&nbsp; Arcade time left: <span id="arcade-timer">${formatMs(game.arcadeMs||0)}</span></p>
+    ${m.over ? `<div class="card"><p class="muted" style="text-align:center;margin:0;">${m.won ? 'You ate every dot! \uD83C\uDF89' : 'Caught! Game over.'}</p></div>` : ''}
+    ${(!hasTime) ? `<div class="card"><p class="muted" style="text-align:center;font-size:0.85rem;margin:0;">${m.over ? 'Out of arcade time, score 90%+ three times on a list to earn more!' : 'Your arcade time has run out, but you can finish this game.'}</p></div>` : ''}
+    <div class="card" style="padding:0.5rem;">
+      <div style="width:100%;max-width:420px;margin:0 auto;position:relative;">
+        <div style="padding-bottom:${(MAZE_ROWS/MAZE_COLS*100).toFixed(2)}%;"></div>
+        <div style="position:absolute;top:0;left:0;right:0;bottom:0;background:#000;border:2px solid var(--ink);border-radius:12px;overflow:hidden;">${cellsHtml}${ghostsHtml}${playerHtml}</div>
+      </div>
+    </div>
+    <div style="max-width:190px;margin:1rem auto 0;display:grid;grid-template-columns:repeat(3,1fr);gap:0.4rem;">
+      <div></div><button class="btn-secondary" id="maze-up">\u2191</button><div></div>
+      <button class="btn-secondary" id="maze-left">\u2190</button><div></div><button class="btn-secondary" id="maze-right">\u2192</button>
+      <div></div><button class="btn-secondary" id="maze-down">\u2193</button><div></div>
+    </div>
+    <div class="btn-row" style="margin-top:1rem;justify-content:center;">
+      <button class="btn-secondary" id="btn-maze-restart" ${hasTime?'':'disabled'}>New game</button>
+    </div>
+  `;
+  document.getElementById('btn-back-arcade').onclick = ()=>{ stopAllArcadeIntervals(); state.view='arcade'; render(); };
+  document.getElementById('btn-maze-restart').onclick = ()=>{ if((game.arcadeMs||0)<=0) return; stopAllArcadeIntervals(); state.maze = newMaze(); render(); };
+  document.getElementById('maze-up').onclick = ()=>mazeSetDir(state.maze,0,-1);
+  document.getElementById('maze-down').onclick = ()=>mazeSetDir(state.maze,0,1);
+  document.getElementById('maze-left').onclick = ()=>mazeSetDir(state.maze,-1,0);
+  document.getElementById('maze-right').onclick = ()=>mazeSetDir(state.maze,1,0);
+  if(!m.over){
+    startMazeLoop();
     if(hasTime) startArcadeCountdown(()=>render());
   }else{
     stopAllArcadeIntervals();
