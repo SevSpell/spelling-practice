@@ -199,15 +199,16 @@ const SEVLINGS = [
 const COLLECTIONS = [['farm','Farm'],['jungle','Jungle'],['sea','Sea'],['pets','Pets']];
 const COLLECTION_COLORS = { farm:'#D9A679', jungle:'#6B8F71', sea:'#4A7C96', pets:'#B98C63' };
 const SEVLING_LOCKED_COLOR = '#3A4C63';
-function sevlingSvg(s, color){
+function sevlingSvg(s, color, extraStyle){
   const body = s.noBody ? '' : `<path d="${SEVLING_BODY}"/>`;
-  return `<svg viewBox="-50 -60 220 220" fill="${color}" style="width:100%;height:100%;display:block;">${body}${s.features||''}</svg>`;
+  return `<svg viewBox="-50 -60 220 220" fill="${color}" style="width:100%;height:100%;display:block;${extraStyle||''}">${body}${s.features||''}</svg>`;
 }
-function sevlingIcon(s, locked){
+function sevlingIcon(s, locked, faceOnly){
+  const zoom = faceOnly ? 'transform:scale(1.9);transform-origin:50% 30%;' : '';
   if(s.image){
-    return `<img src="${s.image}" alt="${escapeHtml(s.name)}" style="width:100%;height:100%;object-fit:contain;display:block;"${locked ? ' class="sevling-locked-img"' : ''}>`;
+    return `<img src="${s.image}" alt="${escapeHtml(s.name)}" style="width:100%;height:100%;object-fit:contain;display:block;${zoom}"${locked ? ' class="sevling-locked-img"' : ''}>`;
   }
-  return sevlingSvg(s, locked ? SEVLING_LOCKED_COLOR : COLLECTION_COLORS[s.collection]);
+  return sevlingSvg(s, locked ? SEVLING_LOCKED_COLOR : COLLECTION_COLORS[s.collection], zoom);
 }
 const FOOD_ITEMS = [
   { id:'carrot', name:'Carrot', emoji:'\u{1F955}', price:1, happiness:8 },
@@ -229,11 +230,11 @@ const state = {
   view: 'settings', lists: [], currentListId: null,
   uploadImageB64: null, uploadImagePreview: null, extractedWords: [], listLabelDraft: '',
   busy: false, error: '', settingsMessage: '', firebaseConfigDraft: '', currentSevlingId: null, authMode: 'signin', practiceLang: 'es',
-  profiles: [], currentProfileId: null, addProfileMode: 'new', c4: null, snake: null, maze: null,
+  profiles: [], currentProfileId: null, addProfileMode: 'new', c4: null, snake: null, maze: null, mazeEscape: null, wordSearch: null,
   practice: { mode:null, words:[], index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:false, reward:null, trophyVariant:null, newSevling:null }
 };
 
-function emptyGameState(){ return { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, listStreaks:{}, streakGoal:4, lastSevlingAt:null, cooldownDays:14, arcadeMs:0, gameUnlockStreaks:{}, selectedSnakeSevling:null, selectedConnect4Sevling:null, selectedMazeSevling:null }; }
+function emptyGameState(){ return { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, listStreaks:{}, streakGoal:4, lastSevlingAt:null, cooldownDays:14, arcadeMs:0, gameUnlockStreaks:{}, selectedSnakeSevling:null, selectedConnect4Sevling:null, selectedMazeSevling:null, selectedMazeEscapeSevling:null }; }
 let game = emptyGameState();
 let settings = { firebaseConfig:null };
 let fbApp = null, db = null, auth = null, authUser = null;
@@ -671,6 +672,8 @@ function render(){
   else if(state.view==='arcade-connect4') renderConnect4();
   else if(state.view==='arcade-snake') renderSnakeGame();
   else if(state.view==='arcade-maze') renderMazeGame();
+  else if(state.view==='arcade-mazeescape') renderMazeEscape();
+  else if(state.view==='arcade-wordsearch') renderWordSearch();
   else if(state.view==='settings') renderSettings();
   wireSpeakButtons(); wireNav(); refreshBadge();
 }
@@ -1596,6 +1599,13 @@ function renderArcade(){
   const mazeOptions = won.length
     ? `<option value="">Classic muncher (no face)</option>` + won.map(s=>`<option value="${s.id}" ${game.selectedMazeSevling===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')
     : `<option value="">No Sevlings to select yet</option>`;
+  const mazeEscapeOptions = won.length
+    ? `<option value="">Classic explorer (no face)</option>` + won.map(s=>`<option value="${s.id}" ${game.selectedMazeEscapeSevling===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')
+    : `<option value="">No Sevlings to select yet</option>`;
+  const englishLists = state.lists.filter(l=>l.lang==='en');
+  const wsOptions = englishLists.length
+    ? englishLists.map(l=>`<option value="${l.id}">${escapeHtml(l.label)} (${l.count} word${l.count===1?'':'s'})</option>`).join('')
+    : `<option value="">No English lists yet</option>`;
   app.innerHTML = `
     ${navRow('arcade')}
     <h2 class="section-title">Arcade</h2>
@@ -1625,6 +1635,20 @@ function renderArcade(){
       <select id="maze-sevling" ${won.length?'':'disabled'}>${mazeOptions}</select>
       <button class="btn-primary btn-block" id="btn-play-maze" ${hasTime?'':'disabled'}>Play Maze Munch</button>
     </div>
+    <div class="card">
+      <h3 style="margin-top:0;">Maze Escape</h3>
+      <p class="muted">A brand new maze every time, find your way to the exit.</p>
+      <label class="muted" style="display:block;margin-bottom:0.2rem;">Choose your explorer</label>
+      <select id="mazeescape-sevling" ${won.length?'':'disabled'}>${mazeEscapeOptions}</select>
+      <button class="btn-primary btn-block" id="btn-play-mazeescape" ${hasTime?'':'disabled'}>Play Maze Escape</button>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">Word Search</h3>
+      <p class="muted">Find every word hidden in the grid. Free to play any time, no arcade time needed.</p>
+      <label class="muted" style="display:block;margin-bottom:0.2rem;">Choose a list</label>
+      <select id="ws-list" ${englishLists.length?'':'disabled'}>${wsOptions}</select>
+      <button class="btn-primary btn-block" id="btn-play-ws" ${englishLists.length?'':'disabled'}>Play Word Search</button>
+    </div>
   `;
   document.getElementById('btn-play-c4').onclick = async ()=>{
     game.selectedConnect4Sevling = document.getElementById('c4-sevling').value || null;
@@ -1643,6 +1667,21 @@ function renderArcade(){
     await saveGame();
     state.maze = newMaze();
     state.view = 'arcade-maze'; render();
+  };
+  document.getElementById('btn-play-mazeescape').onclick = async ()=>{
+    game.selectedMazeEscapeSevling = document.getElementById('mazeescape-sevling').value || null;
+    await saveGame();
+    state.mazeEscape = newMazeEscape();
+    state.view = 'arcade-mazeescape'; render();
+  };
+  const wsBtn = document.getElementById('btn-play-ws');
+  if(wsBtn) wsBtn.onclick = async ()=>{
+    const listId = document.getElementById('ws-list').value;
+    if(!listId) return;
+    const words = await getListWords(listId);
+    const englishWords = words.map(w=>w.english).filter(Boolean);
+    state.wordSearch = newWordSearch(englishWords);
+    state.view = 'arcade-wordsearch'; render();
   };
 }
 
@@ -1697,7 +1736,7 @@ function renderConnect4(){
       const isWin = c4.winCells.some(([cc,rr])=>cc===col&&rr===row);
       let inner = '';
       if(val===1) inner = `<div style="width:100%;height:100%;border-radius:50%;background:var(--pink);border:2px solid var(--ink);"></div>`;
-      else if(val===2) inner = `<div style="width:100%;height:100%;border-radius:50%;background:var(--blue);border:2px solid var(--ink);overflow:hidden;box-sizing:border-box;">${oppSevling ? sevlingIcon(oppSevling,false) : ''}</div>`;
+      else if(val===2) inner = `<div style="width:100%;height:100%;border-radius:50%;background:var(--blue);border:2px solid var(--ink);overflow:hidden;box-sizing:border-box;">${oppSevling ? sevlingIcon(oppSevling,false,true) : ''}</div>`;
       boardHtml += `<div class="c4-cell" data-col="${col}" style="width:40px;height:40px;background:#fff;border:2px solid var(--ink);border-radius:50%;overflow:hidden;${isWin?'box-shadow:0 0 0 3px var(--gold) inset;':''}cursor:pointer;">${inner}</div>`;
     }
   }
@@ -1800,7 +1839,7 @@ function renderSnakeGame(){
       let content = '';
       const style = `position:absolute;left:${x*cellPct}%;top:${y*cellPct}%;width:${cellPct}%;height:${cellPct}%;box-sizing:border-box;padding:1px;`;
       if(segIdx===0){
-        const headInner = headSevling ? sevlingIcon(headSevling,false) : `<div style="width:100%;height:100%;background:var(--correct);border-radius:4px;"></div>`;
+        const headInner = headSevling ? sevlingIcon(headSevling,false,true) : `<div style="width:100%;height:100%;background:var(--correct);border-radius:4px;"></div>`;
         content = `<div style="position:absolute;left:50%;top:50%;width:145%;height:145%;transform:translate(-50%,-50%);border-radius:50%;border:3px solid var(--correct);overflow:hidden;box-sizing:border-box;background:#fff;z-index:2;">${headInner}</div>`;
       }else if(segIdx>-1){
         content = `<div style="width:100%;height:100%;background:var(--correct);opacity:0.7;border-radius:3px;"></div>`;
@@ -1822,10 +1861,10 @@ function renderSnakeGame(){
         <div style="position:absolute;top:0;left:0;right:0;bottom:0;background:var(--bg);border:2px solid var(--ink);border-radius:12px;overflow:hidden;">${cellsHtml}</div>
       </div>
     </div>
-    <div style="max-width:190px;margin:1rem auto 0;display:grid;grid-template-columns:repeat(3,1fr);gap:0.4rem;">
-      <div></div><button class="btn-secondary" id="snake-up">\u2191</button><div></div>
-      <button class="btn-secondary" id="snake-left">\u2190</button><div></div><button class="btn-secondary" id="snake-right">\u2192</button>
-      <div></div><button class="btn-secondary" id="snake-down">\u2193</button><div></div>
+    <div style="max-width:260px;margin:1rem auto 0;display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem;">
+      <div></div><button class="btn-secondary" id="snake-up" style="font-size:1.6rem;padding:1.1rem 0;">\u2191</button><div></div>
+      <button class="btn-secondary" id="snake-left" style="font-size:1.6rem;padding:1.1rem 0;">\u2190</button><div></div><button class="btn-secondary" id="snake-right" style="font-size:1.6rem;padding:1.1rem 0;">\u2192</button>
+      <div></div><button class="btn-secondary" id="snake-down" style="font-size:1.6rem;padding:1.1rem 0;">\u2193</button><div></div>
     </div>
     <div class="btn-row" style="margin-top:1rem;justify-content:center;">
       <button class="btn-secondary" id="btn-snake-restart" ${hasTime?'':'disabled'}>New game</button>
@@ -1874,8 +1913,7 @@ function newMaze(){
     ghosts: [
       { x:1, y:1, color:'var(--wrong)', dir:{x:1,y:0} },
       { x:13, y:1, color:'var(--blue)', dir:{x:-1,y:0} },
-      { x:1, y:9, color:'var(--gold)', dir:{x:1,y:0} },
-      { x:13, y:9, color:'var(--pink)', dir:{x:-1,y:0} }
+      { x:1, y:9, color:'var(--gold)', dir:{x:1,y:0} }
     ],
     dotsLeft, score:0, over:false, won:false, tick:0
   };
@@ -1892,7 +1930,7 @@ function mazeTick(m){
     if(m.dotsLeft<=0){ m.won = true; m.over = true; return; }
   }
   if(m.ghosts.some(g=>g.x===m.player.x && g.y===m.player.y)){ m.over = true; m.won = false; return; }
-  if(m.tick % 2 === 0){
+  if(m.tick % 3 === 0){
     const dirs = [{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
     m.ghosts.forEach(g=>{
       let candidates = dirs.filter(d=> mazeCanMove(m.grid,g.x+d.x,g.y+d.y) && !(d.x===-g.dir.x && d.y===-g.dir.y));
@@ -1955,10 +1993,10 @@ function renderMazeGame(){
         <div style="position:absolute;top:0;left:0;right:0;bottom:0;background:#000;border:2px solid var(--ink);border-radius:12px;overflow:hidden;">${cellsHtml}${ghostsHtml}${playerHtml}</div>
       </div>
     </div>
-    <div style="max-width:190px;margin:1rem auto 0;display:grid;grid-template-columns:repeat(3,1fr);gap:0.4rem;">
-      <div></div><button class="btn-secondary" id="maze-up">\u2191</button><div></div>
-      <button class="btn-secondary" id="maze-left">\u2190</button><div></div><button class="btn-secondary" id="maze-right">\u2192</button>
-      <div></div><button class="btn-secondary" id="maze-down">\u2193</button><div></div>
+    <div style="max-width:260px;margin:1rem auto 0;display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem;">
+      <div></div><button class="btn-secondary" id="maze-up" style="font-size:1.6rem;padding:1.1rem 0;">\u2191</button><div></div>
+      <button class="btn-secondary" id="maze-left" style="font-size:1.6rem;padding:1.1rem 0;">\u2190</button><div></div><button class="btn-secondary" id="maze-right" style="font-size:1.6rem;padding:1.1rem 0;">\u2192</button>
+      <div></div><button class="btn-secondary" id="maze-down" style="font-size:1.6rem;padding:1.1rem 0;">\u2193</button><div></div>
     </div>
     <div class="btn-row" style="margin-top:1rem;justify-content:center;">
       <button class="btn-secondary" id="btn-maze-restart" ${hasTime?'':'disabled'}>New game</button>
@@ -1976,6 +2014,219 @@ function renderMazeGame(){
   }else{
     stopAllArcadeIntervals();
   }
+}
+
+// ---- Maze Escape ----
+function generateMazeEscapeLayout(cols, rows){
+  const visited = Array.from({length:rows}, ()=>Array(cols).fill(false));
+  const hWalls = Array.from({length:rows-1}, ()=>Array(cols).fill(true));
+  const vWalls = Array.from({length:rows}, ()=>Array(cols-1).fill(true));
+  const stack = [[0,0]];
+  visited[0][0] = true;
+  while(stack.length){
+    const [cx,cy] = stack[stack.length-1];
+    const neighbors = [];
+    if(cy>0 && !visited[cy-1][cx]) neighbors.push(['up',cx,cy-1]);
+    if(cy<rows-1 && !visited[cy+1][cx]) neighbors.push(['down',cx,cy+1]);
+    if(cx>0 && !visited[cy][cx-1]) neighbors.push(['left',cx-1,cy]);
+    if(cx<cols-1 && !visited[cy][cx+1]) neighbors.push(['right',cx+1,cy]);
+    if(!neighbors.length){ stack.pop(); continue; }
+    const [dir,nx,ny] = neighbors[Math.floor(Math.random()*neighbors.length)];
+    if(dir==='up') hWalls[cy-1][cx] = false;
+    else if(dir==='down') hWalls[cy][cx] = false;
+    else if(dir==='left') vWalls[cy][cx-1] = false;
+    else if(dir==='right') vWalls[cy][cx] = false;
+    visited[ny][nx] = true;
+    stack.push([nx,ny]);
+  }
+  return { hWalls, vWalls, cols, rows };
+}
+function mazeEscapeWallAt(maze, cx, cy, side){
+  if(side==='top') return cy===0 ? true : maze.hWalls[cy-1][cx];
+  if(side==='bottom') return cy===maze.rows-1 ? true : maze.hWalls[cy][cx];
+  if(side==='left') return cx===0 ? true : maze.vWalls[cy][cx-1];
+  if(side==='right') return cx===maze.cols-1 ? true : maze.vWalls[cy][cx];
+}
+function newMazeEscape(){
+  const cols = 9, rows = 7;
+  const maze = generateMazeEscapeLayout(cols, rows);
+  return { maze, cols, rows, player:{x:0,y:0}, moves:0, startedAt: Date.now(), over:false, elapsedSec:0 };
+}
+function mazeEscapeCanMove(me, x, y, dx, dy){
+  const nx = x+dx, ny = y+dy;
+  if(nx<0 || nx>=me.cols || ny<0 || ny>=me.rows) return false;
+  if(dx===1) return !me.maze.vWalls[y][x];
+  if(dx===-1) return !me.maze.vWalls[y][x-1];
+  if(dy===1) return !me.maze.hWalls[y][x];
+  if(dy===-1) return !me.maze.hWalls[y-1][x];
+  return false;
+}
+function mazeEscapeMove(dx,dy){
+  const me = state.mazeEscape;
+  if(!me || me.over) return;
+  if(mazeEscapeCanMove(me, me.player.x, me.player.y, dx, dy)){
+    me.player.x += dx; me.player.y += dy;
+    me.moves++;
+    if(me.player.x===me.cols-1 && me.player.y===me.rows-1){
+      me.over = true;
+      me.elapsedSec = Math.max(1, Math.round((Date.now()-me.startedAt)/1000));
+    }
+    render();
+  }
+}
+function renderMazeEscape(){
+  if(!state.mazeEscape) state.mazeEscape = newMazeEscape();
+  const me = state.mazeEscape;
+  const charId = game.selectedMazeEscapeSevling;
+  const charSevling = charId ? SEVLINGS.find(x=>x.id===charId) : null;
+  const hasTime = (game.arcadeMs||0) > 0;
+  const cellPctX = 100/me.cols, cellPctY = 100/me.rows;
+  let cellsHtml = '';
+  for(let y=0;y<me.rows;y++){
+    for(let x=0;x<me.cols;x++){
+      const isGoal = (x===me.cols-1 && y===me.rows-1);
+      const top = mazeEscapeWallAt(me.maze,x,y,'top');
+      const bottom = mazeEscapeWallAt(me.maze,x,y,'bottom');
+      const left = mazeEscapeWallAt(me.maze,x,y,'left');
+      const right = isGoal ? false : mazeEscapeWallAt(me.maze,x,y,'right');
+      const style = `position:absolute;left:${x*cellPctX}%;top:${y*cellPctY}%;width:${cellPctX}%;height:${cellPctY}%;box-sizing:border-box;border-top:2px solid ${top?'var(--ink)':'transparent'};border-bottom:2px solid ${bottom?'var(--ink)':'transparent'};border-left:2px solid ${left?'var(--ink)':'transparent'};border-right:2px solid ${right?'var(--ink)':'transparent'};`;
+      const marker = isGoal ? `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:60%;">\uD83C\uDFC1</div>` : '';
+      cellsHtml += `<div style="${style}">${marker}</div>`;
+    }
+  }
+  const playerInner = charSevling ? sevlingIcon(charSevling,false,true) : `<div style="width:100%;height:100%;border-radius:50%;background:#FFD447;"></div>`;
+  const playerHtml = `<div style="position:absolute;left:${me.player.x*cellPctX}%;top:${me.player.y*cellPctY}%;width:${cellPctX}%;height:${cellPctY}%;box-sizing:border-box;padding:2px;z-index:3;"><div style="width:100%;height:100%;border-radius:50%;overflow:hidden;background:#fff;border:2px solid var(--ink);">${playerInner}</div></div>`;
+  app.innerHTML = `
+    <button class="btn-ghost" id="btn-back-arcade">\u2190 Back to Arcade</button>
+    <h2 class="section-title">Maze Escape</h2>
+    <p class="progress" style="text-align:center;">Moves: ${me.moves} &nbsp;\u00B7&nbsp; Arcade time left: <span id="arcade-timer">${formatMs(game.arcadeMs||0)}</span></p>
+    ${me.over ? `<div class="card"><p class="muted" style="text-align:center;margin:0;">You escaped in ${me.moves} moves and ${me.elapsedSec}s! \uD83C\uDF89</p></div>` : ''}
+    ${(!hasTime) ? `<div class="card"><p class="muted" style="text-align:center;font-size:0.85rem;margin:0;">${me.over ? 'Out of arcade time, score 90%+ three times on a list to earn more!' : 'Your arcade time has run out, but you can finish this maze.'}</p></div>` : ''}
+    <div class="card" style="padding:0.5rem;">
+      <div style="width:100%;max-width:560px;margin:0 auto;position:relative;">
+        <div style="padding-bottom:${(me.rows/me.cols*100).toFixed(2)}%;"></div>
+        <div style="position:absolute;top:0;left:0;right:0;bottom:0;background:var(--bg);border-radius:12px;overflow:hidden;">${cellsHtml}${playerHtml}</div>
+      </div>
+    </div>
+    <div style="max-width:260px;margin:1rem auto 0;display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem;">
+      <div></div><button class="btn-secondary" id="me-up" style="font-size:1.6rem;padding:1.1rem 0;">\u2191</button><div></div>
+      <button class="btn-secondary" id="me-left" style="font-size:1.6rem;padding:1.1rem 0;">\u2190</button><div></div><button class="btn-secondary" id="me-right" style="font-size:1.6rem;padding:1.1rem 0;">\u2192</button>
+      <div></div><button class="btn-secondary" id="me-down" style="font-size:1.6rem;padding:1.1rem 0;">\u2193</button><div></div>
+    </div>
+    <div class="btn-row" style="margin-top:1rem;justify-content:center;">
+      <button class="btn-secondary" id="btn-me-restart" ${hasTime?'':'disabled'}>New maze</button>
+    </div>
+  `;
+  document.getElementById('btn-back-arcade').onclick = ()=>{ stopAllArcadeIntervals(); state.view='arcade'; render(); };
+  document.getElementById('btn-me-restart').onclick = ()=>{ if((game.arcadeMs||0)<=0) return; stopAllArcadeIntervals(); state.mazeEscape = newMazeEscape(); render(); };
+  document.getElementById('me-up').onclick = ()=>mazeEscapeMove(0,-1);
+  document.getElementById('me-down').onclick = ()=>mazeEscapeMove(0,1);
+  document.getElementById('me-left').onclick = ()=>mazeEscapeMove(-1,0);
+  document.getElementById('me-right').onclick = ()=>mazeEscapeMove(1,0);
+  if(!me.over && hasTime) startArcadeCountdown(()=>render());
+  else if(me.over) stopAllArcadeIntervals();
+}
+
+// ---- Word Search ----
+const WORDSEARCH_DIRS = [{dx:1,dy:0},{dx:-1,dy:0},{dx:0,dy:1},{dx:0,dy:-1},{dx:1,dy:1},{dx:-1,dy:-1},{dx:1,dy:-1},{dx:-1,dy:1}];
+function generateWordSearchGrid(words, size){
+  const grid = Array.from({length:size}, ()=>Array(size).fill(null));
+  const placements = [];
+  const sorted = words.slice().sort((a,b)=>b.length-a.length);
+  for(const word of sorted){
+    const letters = word.toUpperCase().replace(/[^A-Z]/g,'');
+    if(!letters) continue;
+    let placed = false;
+    for(let attempt=0; attempt<300 && !placed; attempt++){
+      const dir = WORDSEARCH_DIRS[Math.floor(Math.random()*WORDSEARCH_DIRS.length)];
+      const startX = Math.floor(Math.random()*size), startY = Math.floor(Math.random()*size);
+      const endX = startX+dir.dx*(letters.length-1), endY = startY+dir.dy*(letters.length-1);
+      if(endX<0||endX>=size||endY<0||endY>=size) continue;
+      let ok = true;
+      for(let i=0;i<letters.length;i++){
+        const cx=startX+dir.dx*i, cy=startY+dir.dy*i;
+        if(grid[cy][cx]!==null && grid[cy][cx]!==letters[i]){ ok=false; break; }
+      }
+      if(!ok) continue;
+      const cells=[];
+      for(let i=0;i<letters.length;i++){ const cx=startX+dir.dx*i, cy=startY+dir.dy*i; grid[cy][cx]=letters[i]; cells.push({x:cx,y:cy}); }
+      placements.push({ word, cells, found:false });
+      placed = true;
+    }
+  }
+  const ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  for(let y=0;y<size;y++) for(let x=0;x<size;x++) if(grid[y][x]===null) grid[y][x] = ALPHA[Math.floor(Math.random()*26)];
+  return { grid, placements, size };
+}
+function newWordSearch(words){
+  const cleanWords = (words||[]).map(w=>(w||'').trim()).filter(Boolean);
+  const longest = cleanWords.reduce((m,w)=>Math.max(m,w.length),0);
+  const size = Math.max(10, Math.min(16, longest+3));
+  const ws = generateWordSearchGrid(cleanWords, size);
+  return { ...ws, sourceWords: cleanWords, selecting: null };
+}
+function wordSearchCheckSelection(ws,x1,y1,x2,y2){
+  if(Math.abs(x2-x1)!==0 && Math.abs(y2-y1)!==0 && Math.abs(x2-x1)!==Math.abs(y2-y1)) return null;
+  const dx = Math.sign(x2-x1), dy = Math.sign(y2-y1);
+  const len = Math.max(Math.abs(x2-x1),Math.abs(y2-y1))+1;
+  const cells = []; for(let i=0;i<len;i++) cells.push({x:x1+dx*i,y:y1+dy*i});
+  for(const p of ws.placements){
+    if(p.found) continue;
+    const fwd = p.cells.length===cells.length && p.cells.every((c,i)=>c.x===cells[i].x&&c.y===cells[i].y);
+    const bwd = p.cells.length===cells.length && p.cells.every((c,i)=>c.x===cells[cells.length-1-i].x&&c.y===cells[cells.length-1-i].y);
+    if(fwd||bwd) return p;
+  }
+  return null;
+}
+function wordSearchTapCell(x,y){
+  const ws = state.wordSearch;
+  if(!ws) return;
+  if(!ws.selecting){
+    ws.selecting = {x,y};
+  }else{
+    const match = wordSearchCheckSelection(ws, ws.selecting.x, ws.selecting.y, x, y);
+    if(match) match.found = true;
+    ws.selecting = null;
+  }
+  render();
+}
+function renderWordSearch(){
+  const ws = state.wordSearch;
+  if(!ws){ state.view='arcade'; render(); return; }
+  const cellPct = 100/ws.size;
+  let cellsHtml = '';
+  for(let y=0;y<ws.size;y++){
+    for(let x=0;x<ws.size;x++){
+      const letter = ws.grid[y][x];
+      const isSelecting = ws.selecting && ws.selecting.x===x && ws.selecting.y===y;
+      const foundHere = ws.placements.some(p=>p.found && p.cells.some(c=>c.x===x&&c.y===y));
+      const bg = isSelecting ? 'var(--gold)' : (foundHere ? 'var(--correct)' : 'transparent');
+      const color = (isSelecting||foundHere) ? '#fff' : 'var(--ink)';
+      cellsHtml += `<div class="ws-cell" data-x="${x}" data-y="${y}" style="position:absolute;left:${x*cellPct}%;top:${y*cellPct}%;width:${cellPct}%;height:${cellPct}%;display:flex;align-items:center;justify-content:center;font-weight:700;font-family:'Baloo 2',sans-serif;background:${bg};color:${color};border-radius:4px;cursor:pointer;box-sizing:border-box;">${letter}</div>`;
+    }
+  }
+  const wordListHtml = ws.placements.map(p=>`<span style="display:inline-block;margin:0.15rem 0.3rem;padding:0.25rem 0.6rem;border-radius:8px;background:${p.found?'var(--correct)':'var(--surface)'};color:${p.found?'#fff':'var(--ink)'};border:1.5px solid var(--ink);text-decoration:${p.found?'line-through':'none'};font-size:0.85rem;">${escapeHtml(p.word)}</span>`).join('');
+  const allFound = ws.placements.length>0 && ws.placements.every(p=>p.found);
+  app.innerHTML = `
+    <button class="btn-ghost" id="btn-back-arcade">\u2190 Back to Arcade</button>
+    <h2 class="section-title">Word Search</h2>
+    ${allFound ? `<div class="card"><p class="muted" style="text-align:center;margin:0;">You found every word! \uD83C\uDF89</p></div>` : `<p class="muted" style="text-align:center;">Tap the first letter, then the last letter of a word.</p>`}
+    <div class="card" style="padding:0.5rem;">
+      <div style="width:100%;max-width:420px;margin:0 auto;position:relative;">
+        <div style="padding-bottom:100%;"></div>
+        <div style="position:absolute;top:0;left:0;right:0;bottom:0;">${cellsHtml}</div>
+      </div>
+    </div>
+    <div class="card" style="text-align:center;">${wordListHtml}</div>
+    <div class="btn-row" style="margin-top:1rem;justify-content:center;">
+      <button class="btn-secondary" id="btn-ws-restart">New puzzle</button>
+    </div>
+  `;
+  document.getElementById('btn-back-arcade').onclick = ()=>{ stopAllArcadeIntervals(); state.view='arcade'; render(); };
+  document.getElementById('btn-ws-restart').onclick = ()=>{ state.wordSearch = newWordSearch(ws.sourceWords); render(); };
+  document.querySelectorAll('.ws-cell').forEach(el=>{
+    el.onclick = ()=>wordSearchTapCell(+el.dataset.x, +el.dataset.y);
+  });
 }
 
 function renderSettings(){
