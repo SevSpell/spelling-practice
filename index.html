@@ -144,6 +144,18 @@
   .sevling-icon svg, .sevling-icon img{ width:100%; height:100%; display:block; object-fit:contain; }
   .sevling-locked-img{ filter:brightness(0); }
   .sevling-worn-badges{ font-size:0.95rem; margin-bottom:0.2rem; }
+  .game-card{ padding:0.5rem; }
+  .game-stage{ position:relative; width:100%; max-width:560px; margin:0 auto; border:2px solid var(--ink); border-radius:12px; overflow:hidden; background:var(--bg); }
+  .game-canvas{ display:block; width:100%; height:100%; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; cursor:pointer; }
+  .game-face{ position:absolute; aspect-ratio:1/1; transform:translate(-50%,-50%); border-radius:50%; border:2px solid var(--ink); background:#fff; overflow:hidden; pointer-events:none; z-index:2; }
+  .racer-prompt{ position:absolute; inset:0; z-index:3; display:flex; align-items:center; justify-content:center; padding:0.7rem; background:rgba(34,26,61,0.38); overflow:auto; }
+  .racer-prompt-card{ width:100%; max-width:360px; margin:0; padding:0.9rem 1rem; }
+  .racer-prompt-card .practice-word{ font-size:clamp(1.6rem,8vw,2.3rem); }
+  .racer-prompt-card input[type=text]{ margin-bottom:0.6rem; }
+  .racer-steer{ max-width:360px; margin:1rem auto 0; display:grid; grid-template-columns:1fr 1fr; gap:0.8rem; }
+  .racer-steer button{ font-size:2rem; padding:1.2rem 0; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+  .racer-list-row{ cursor:pointer; }
+  .racer-list-row input[type=checkbox]{ width:22px; height:22px; margin:0; accent-color:var(--pink); flex-shrink:0; }
   @media (prefers-reduced-motion: reduce){ .spinner{animation:none;} .blob{animation:none;top:20px;} }
 </style>
 </head>
@@ -287,11 +299,11 @@ const state = {
   view: 'settings', lists: [], currentListId: null,
   uploadImageB64: null, uploadImagePreview: null, extractedWords: [], listLabelDraft: '',
   busy: false, error: '', settingsMessage: '', firebaseConfigDraft: '', currentSevlingId: null, authMode: 'signin', practiceLang: 'es',
-  profiles: [], currentProfileId: null, addProfileMode: 'new', c4: null, snake: null, maze: null, mazeEscape: null, wordSearch: null,
+  profiles: [], currentProfileId: null, addProfileMode: 'new', c4: null, snake: null, maze: null, brick: null, racer: null, wordSearch: null,
   practice: { mode:null, words:[], index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:false, reward:null, trophyVariant:null, newSevling:null }
 };
 
-function emptyGameState(){ return { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, listStreaks:{}, streakGoal:4, lastSevlingAt:null, cooldownDays:14, fullMarksSinceLastWin:0, arcadeMs:0, gameUnlockStreaks:{}, selectedSnakeSevling:null, selectedConnect4Sevling:null, selectedMazeSevling:null, selectedMazeEscapeSevling:null }; }
+function emptyGameState(){ return { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, listStreaks:{}, streakGoal:4, lastSevlingAt:null, cooldownDays:14, fullMarksSinceLastWin:0, arcadeMs:0, gameUnlockStreaks:{}, selectedSnakeSevling:null, selectedConnect4Sevling:null, selectedMazeSevling:null, selectedBrickSevling:null, selectedRacerSevling:null, racerListIds:[], racerSpanishMode:'copy', racerDifficulty:'gentle' }; }
 let game = emptyGameState();
 let settings = { firebaseConfig:null };
 let fbApp = null, db = null, auth = null, authUser = null;
@@ -567,7 +579,11 @@ async function loadGame(){
   const empty = emptyGameState();
   try{
     const d = await fsGetP('data','game');
-    if(d) return Object.assign(empty, d);
+    if(d){
+      const merged = Object.assign(empty, d);
+      delete merged.selectedMazeEscapeSevling; // Maze Escape was removed, drop its old setting on next save
+      return merged;
+    }
   }catch(e){}
   return empty;
 }
@@ -730,7 +746,9 @@ function render(){
   else if(state.view==='arcade-connect4') renderConnect4();
   else if(state.view==='arcade-snake') renderSnakeGame();
   else if(state.view==='arcade-maze') renderMazeGame();
-  else if(state.view==='arcade-mazeescape') renderMazeEscape();
+  else if(state.view==='arcade-brick') renderBrickBreaker();
+  else if(state.view==='arcade-racer-setup') renderRacerSetup();
+  else if(state.view==='arcade-racer') renderRacer();
   else if(state.view==='wordsearch-pick') renderWordSearchPicker();
   else if(state.view==='wordsearch') renderWordSearch();
   else if(state.view==='settings') renderSettings();
@@ -1330,17 +1348,23 @@ function feedbackHtml(p, word){
   }
   return `<div class="feedback no">Not quite<span class="answer">Correct spelling: ${escapeHtml(targetText)} ${speakBtn(targetText,targetLang)}</span></div>`;
 }
+// Shared grading used by practice mode and the Overhead Racer pit-stop spellings:
+// capitalisation and punctuation ignored, a missing accent still counts (flagged), ñ is not an accent.
+function gradeSpelling(inputText, targetText){
+  const target = normaliseBase(targetText);
+  const input = normaliseBase(inputText);
+  const exact = input === target;
+  const matchesIgnoringAccents = stripAccents(input) === stripAccents(target);
+  const correct = exact || matchesIgnoringAccents;
+  return { correct, accentMissing: correct && !exact };
+}
 function checkAnswer(word){
   const p = state.practice;
   const info = modeInfo(p.mode);
-  const targetText = word[info.gradeField];
-  const target = normaliseBase(targetText);
-  const input = normaliseBase(p.input);
-  const exact = input === target;
-  const matchesIgnoringAccents = stripAccents(input) === stripAccents(target);
+  const result = gradeSpelling(p.input, word[info.gradeField]);
   p.checked = true;
-  p.lastCorrect = exact || matchesIgnoringAccents;
-  p.accentMissing = p.lastCorrect && !exact;
+  p.lastCorrect = result.correct;
+  p.accentMissing = result.accentMissing;
   if(p.lastCorrect) p.score++; else p.wrong.push(word);
   render();
 }
@@ -1638,6 +1662,8 @@ function stopAllArcadeIntervals(){
   if(arcadeTickInterval){ clearInterval(arcadeTickInterval); arcadeTickInterval = null; }
   if(snakeLoopInterval){ clearInterval(snakeLoopInterval); snakeLoopInterval = null; }
   if(mazeLoopInterval){ clearInterval(mazeLoopInterval); mazeLoopInterval = null; }
+  if(arcadeRafId){ cancelAnimationFrame(arcadeRafId); arcadeRafId = null; }
+  clearRacerRevealTimer();
 }
 const GAME_ITEM_NAMES = ['a squeaky toy','a tasty treat','a chew toy','a special snack','a bouncy ball','a bone'];
 async function awardSevlingItem(sevlingId){
@@ -1681,9 +1707,8 @@ function renderArcade(){
   const mazeOptions = won.length
     ? `<option value="">Classic muncher (no face)</option>` + won.map(s=>`<option value="${s.id}" ${game.selectedMazeSevling===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')
     : `<option value="">No Sevlings to select yet</option>`;
-  const mazeEscapeOptions = won.length
-    ? `<option value="">Classic explorer (no face)</option>` + won.map(s=>`<option value="${s.id}" ${game.selectedMazeEscapeSevling===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')
-    : `<option value="">No Sevlings to select yet</option>`;
+  const brickOptions = sevlingSelectOptions(won, game.selectedBrickSevling, 'Classic paddle (no face)');
+  const racerOptions = sevlingSelectOptions(won, game.selectedRacerSevling, 'Classic car (no driver)');
   app.innerHTML = `
     ${navRow('arcade')}
     <h2 class="section-title">Arcade</h2>
@@ -1714,11 +1739,18 @@ function renderArcade(){
       <button class="btn-primary btn-block" id="btn-play-maze" ${hasTime?'':'disabled'}>Play Maze Munch</button>
     </div>
     <div class="card">
-      <h3 style="margin-top:0;">Maze Escape</h3>
-      <p class="muted">A brand new maze every time, find your way to the exit.</p>
-      <label class="muted" style="display:block;margin-bottom:0.2rem;">Choose your explorer</label>
-      <select id="mazeescape-sevling" ${won.length?'':'disabled'}>${mazeEscapeOptions}</select>
-      <button class="btn-primary btn-block" id="btn-play-mazeescape" ${hasTime?'':'disabled'}>Play Maze Escape</button>
+      <h3 style="margin-top:0;">Brick Breaker</h3>
+      <p class="muted">Bounce the ball to smash every brick. Catch the falling icons for power-ups.</p>
+      <label class="muted" style="display:block;margin-bottom:0.2rem;">Choose your paddle</label>
+      <select id="brick-sevling" ${won.length?'':'disabled'}>${brickOptions}</select>
+      <button class="btn-primary btn-block" id="btn-play-brick" ${hasTime?'':'disabled'}>Play Brick Breaker</button>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">Overhead Racer</h3>
+      <p class="muted">Race two computer cars round a neon track, spell words at pit stops for turbo boosts.</p>
+      <label class="muted" style="display:block;margin-bottom:0.2rem;">Choose your driver</label>
+      <select id="racer-sevling" ${won.length?'':'disabled'}>${racerOptions}</select>
+      <button class="btn-primary btn-block" id="btn-play-racer" ${hasTime?'':'disabled'}>Choose words and race</button>
     </div>
   `;
   document.getElementById('btn-play-c4').onclick = async ()=>{
@@ -1739,11 +1771,17 @@ function renderArcade(){
     state.maze = newMaze();
     state.view = 'arcade-maze'; render();
   };
-  document.getElementById('btn-play-mazeescape').onclick = async ()=>{
-    game.selectedMazeEscapeSevling = document.getElementById('mazeescape-sevling').value || null;
+  document.getElementById('btn-play-brick').onclick = async ()=>{
+    game.selectedBrickSevling = document.getElementById('brick-sevling').value || null;
     await saveGame();
-    state.mazeEscape = newMazeEscape();
-    state.view = 'arcade-mazeescape'; render();
+    state.brick = newBrickBreaker();
+    state.view = 'arcade-brick'; render();
+  };
+  document.getElementById('btn-play-racer').onclick = async ()=>{
+    game.selectedRacerSevling = document.getElementById('racer-sevling').value || null;
+    await saveGame();
+    state.racer = null; state.error = '';
+    state.view = 'arcade-racer-setup'; render();
   };
 }
 
@@ -2096,118 +2134,1038 @@ function renderMazeGame(){
   }
 }
 
-// ---- Maze Escape ----
-function generateMazeEscapeLayout(cols, rows){
-  const visited = Array.from({length:rows}, ()=>Array(cols).fill(false));
-  const hWalls = Array.from({length:rows-1}, ()=>Array(cols).fill(true));
-  const vWalls = Array.from({length:rows}, ()=>Array(cols-1).fill(true));
-  const stack = [[0,0]];
-  visited[0][0] = true;
-  while(stack.length){
-    const [cx,cy] = stack[stack.length-1];
-    const neighbors = [];
-    if(cy>0 && !visited[cy-1][cx]) neighbors.push(['up',cx,cy-1]);
-    if(cy<rows-1 && !visited[cy+1][cx]) neighbors.push(['down',cx,cy+1]);
-    if(cx>0 && !visited[cy][cx-1]) neighbors.push(['left',cx-1,cy]);
-    if(cx<cols-1 && !visited[cy][cx+1]) neighbors.push(['right',cx+1,cy]);
-    if(!neighbors.length){ stack.pop(); continue; }
-    const [dir,nx,ny] = neighbors[Math.floor(Math.random()*neighbors.length)];
-    if(dir==='up') hWalls[cy-1][cx] = false;
-    else if(dir==='down') hWalls[cy][cx] = false;
-    else if(dir==='left') vWalls[cy][cx-1] = false;
-    else if(dir==='right') vWalls[cy][cx] = false;
-    visited[ny][nx] = true;
-    stack.push([nx,ny]);
+// ---- Shared canvas-game helpers (Brick Breaker, Overhead Racer) ----
+// These two games draw to a <canvas> on a requestAnimationFrame loop rather than rebuilding
+// the DOM every tick. The loop looks its canvas up by id on every frame, so a render() of the
+// same view (e.g. when the arcade countdown expires) simply swaps in a fresh canvas and the
+// loop carries on drawing into it.
+let arcadeRafId = null;
+function startArcadeRaf(step){
+  if(arcadeRafId) return;
+  let last = performance.now();
+  const frame = (now)=>{
+    const dt = Math.min(0.05, Math.max(0, (now-last)/1000)); last = now;
+    const keepGoing = step(dt);
+    arcadeRafId = keepGoing===false ? null : requestAnimationFrame(frame);
+  };
+  arcadeRafId = requestAnimationFrame(frame);
+}
+function pauseArcadeCountdown(){ if(arcadeTickInterval){ clearInterval(arcadeTickInterval); arcadeTickInterval = null; } }
+function prepCanvas(id, w, h){
+  const c = document.getElementById(id);
+  if(!c) return null;
+  const dpr = Math.min(2, window.devicePixelRatio||1);
+  if(c.dataset.ready!=='1'){
+    c.width = Math.round(w*dpr); c.height = Math.round(h*dpr);
+    c.dataset.ready = '1';
   }
-  return { hWalls, vWalls, cols, rows };
+  const ctx = c.getContext('2d');
+  return { c, ctx, dpr };
 }
-function mazeEscapeWallAt(maze, cx, cy, side){
-  if(side==='top') return cy===0 ? true : maze.hWalls[cy-1][cx];
-  if(side==='bottom') return cy===maze.rows-1 ? true : maze.hWalls[cy][cx];
-  if(side==='left') return cx===0 ? true : maze.vWalls[cy][cx-1];
-  if(side==='right') return cx===maze.cols-1 ? true : maze.vWalls[cy][cx];
+function rrPath(ctx, x, y, w, h, r){
+  const rad = Math.min(r, w/2, h/2);
+  ctx.beginPath();
+  ctx.moveTo(x+rad, y);
+  ctx.arcTo(x+w, y, x+w, y+h, rad);
+  ctx.arcTo(x+w, y+h, x, y+h, rad);
+  ctx.arcTo(x, y+h, x, y, rad);
+  ctx.arcTo(x, y, x+w, y, rad);
+  ctx.closePath();
 }
-function newMazeEscape(){
-  const cols = 9, rows = 7;
-  const maze = generateMazeEscapeLayout(cols, rows);
-  return { maze, cols, rows, player:{x:0,y:0}, moves:0, startedAt: Date.now(), over:false, elapsedSec:0, wonItemName:null };
+// A "sticker" shape in the Foil style: hard ink offset shadow, colour fill, 2px ink outline.
+function stickerRect(ctx, x, y, w, h, r, fill, shadow){
+  const off = shadow==null ? 3 : shadow;
+  if(off){ ctx.fillStyle = FOIL.ink; rrPath(ctx, x+off, y+off, w, h, r); ctx.fill(); }
+  ctx.fillStyle = fill; rrPath(ctx, x, y, w, h, r); ctx.fill();
+  ctx.lineWidth = 2; ctx.strokeStyle = FOIL.ink; ctx.stroke();
 }
-function mazeEscapeCanMove(me, x, y, dx, dy){
-  const nx = x+dx, ny = y+dy;
-  if(nx<0 || nx>=me.cols || ny<0 || ny>=me.rows) return false;
-  if(dx===1) return !me.maze.vWalls[y][x];
-  if(dx===-1) return !me.maze.vWalls[y][x-1];
-  if(dy===1) return !me.maze.hWalls[y][x];
-  if(dy===-1) return !me.maze.hWalls[y-1][x];
-  return false;
+function holoGradient(ctx, x0, y0, x1, y1){
+  const g = ctx.createLinearGradient(x0, y0, x1, y1);
+  g.addColorStop(0, FOIL.pink); g.addColorStop(0.35, FOIL.blue); g.addColorStop(0.7, FOIL.gold); g.addColorStop(1, FOIL.lime);
+  return g;
 }
-function mazeEscapeMove(dx,dy){
-  const me = state.mazeEscape;
-  if(!me || me.over) return;
-  if(mazeEscapeCanMove(me, me.player.x, me.player.y, dx, dy)){
-    me.player.x += dx; me.player.y += dy;
-    me.moves++;
-    if(me.player.x===me.cols-1 && me.player.y===me.rows-1){
-      me.over = true;
-      me.elapsedSec = Math.max(1, Math.round((Date.now()-me.startedAt)/1000));
-      const sevlingId = game.selectedMazeEscapeSevling;
-      if(sevlingId) awardSevlingItem(sevlingId).then(itemName=>{ me.wonItemName = itemName; render(); });
+const FOIL = { bg:'#F7F5FF', ink:'#221A3D', inkSoft:'#6B6289', pink:'#FF3EA5', blue:'#00C2FF', gold:'#FFD447', lime:'#C4FF3D', white:'#FFFFFF' };
+const GAME_EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+function setTextIfChanged(id, text){ const el = document.getElementById(id); if(el && el.textContent!==text) el.textContent = text; }
+function sevlingSelectOptions(won, selectedId, classicLabel){
+  return won.length
+    ? `<option value="">${classicLabel}</option>` + won.map(s=>`<option value="${s.id}" ${selectedId===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')
+    : `<option value="">No Sevlings to select yet</option>`;
+}
+function ordinal(n){ return n===1?'1st':n===2?'2nd':n===3?'3rd':n+'th'; }
+
+// Keyboard support for the two canvas games (touch controls are the main input, this is
+// a bonus for laptops). Ignored whenever a text box has focus, so typing a spelling works.
+const heldKeys = {};
+window.addEventListener('keydown', (e)=>{
+  const tag = (e.target && e.target.tagName) || '';
+  if(tag==='INPUT' || tag==='TEXTAREA' || tag==='SELECT') return;
+  if(state.view!=='arcade-brick' && state.view!=='arcade-racer') return;
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(e.key)){
+    e.preventDefault();
+    heldKeys[e.key] = true;
+    if(e.key===' ' && state.view==='arcade-brick') bbLaunch();
+  }
+});
+window.addEventListener('keyup', (e)=>{ heldKeys[e.key] = false; });
+window.addEventListener('blur', ()=>{ Object.keys(heldKeys).forEach(k=>heldKeys[k]=false); });
+
+// ---- Brick Breaker ----
+// Logical board is 480 x 560, scaled to fit the card by CSS. Ball speed deliberately starts
+// gentle and ramps only slightly per level, with 5 lives, so it stays winnable for younger players.
+const BB_W = 480, BB_H = 560;
+const BB_COLS = 8, BB_MARGIN = 16, BB_GAP = 6, BB_BRICK_H = 22, BB_TOP = 52;
+const BB_BRICK_W = (BB_W - BB_MARGIN*2 - BB_GAP*(BB_COLS-1)) / BB_COLS;
+const BB_BASE_SPEED = 240;
+const BB_PADDLE_W = 100;
+const BB_LIVES = 5;
+const BB_REWARD_BRICKS = 25;
+const BB_POWERS = {
+  wide:   { emoji:'\u2194\uFE0F', label:'Wide paddle!', colour:FOIL.blue, secs:12 },
+  multi:  { emoji:'\u2728', label:'Multi-ball!', colour:FOIL.gold, secs:0 },
+  sticky: { emoji:'\uD83C\uDF6F', label:'Sticky paddle! Tap to let go', colour:FOIL.lime, secs:15 },
+  laser:  { emoji:'\u26A1', label:'Lasers!', colour:FOIL.pink, secs:10 }
+};
+const BB_ROW_COLOURS = [FOIL.pink, FOIL.blue, FOIL.gold, FOIL.lime, FOIL.pink, FOIL.blue];
+function bbLevelLayout(level){
+  const bricks = [];
+  const add = (col,row,hp)=>bricks.push({ x: BB_MARGIN + col*(BB_BRICK_W+BB_GAP), y: BB_TOP + row*(BB_BRICK_H+BB_GAP), w: BB_BRICK_W, h: BB_BRICK_H, hp, maxHp:hp, colour: BB_ROW_COLOURS[row%BB_ROW_COLOURS.length], power:null, alive:true });
+  const pattern = (level-1) % 3;
+  if(pattern===0){
+    const rows = level===1 ? 5 : 6;
+    for(let r=0;r<rows;r++) for(let c=0;c<BB_COLS;c++) add(c, r, (level>1 && r<2) ? 2 : 1);
+  }else if(pattern===1){
+    for(let r=0;r<6;r++) for(let c=0;c<BB_COLS;c++) if((r+c)%2===0 || r===0) add(c, r, r===0 ? 2 : 1);
+  }else{
+    for(let r=0;r<6;r++){
+      const inset = Math.abs(r-2.5) < 1 ? 0 : (Math.abs(r-2.5) < 2 ? 1 : 2);
+      for(let c=inset;c<BB_COLS-inset;c++) add(c, r, (r===2||r===3) ? 2 : 1);
     }
-    render();
+  }
+  // Scatter power-up bricks, making sure every power type appears at least once per wall.
+  const kinds = shuffle(['wide','multi','sticky','laser','wide','multi','laser','sticky']);
+  const picks = shuffle(bricks.map((_,i)=>i)).slice(0, Math.min(kinds.length, Math.round(bricks.length/6)));
+  picks.forEach((bi,k)=>{ bricks[bi].power = kinds[k % kinds.length]; });
+  return bricks;
+}
+function bbNewBall(bb){ return { x: bb.paddle.x, y: bb.paddle.y - 9, vx:0, vy:0, r:8, stuck:true, offset:0 }; }
+function newBrickBreaker(){
+  const bb = {
+    level:1, lives:BB_LIVES, score:0, bricksBroken:0, time:0,
+    paddle:{ x:BB_W/2, y:BB_H-42, h:14, w:BB_PADDLE_W },
+    balls:[], drops:[], bolts:[], bricks:bbLevelLayout(1),
+    wideUntil:0, stickyUntil:0, laserUntil:0, laserCooldown:0,
+    pointerX:null, banner:'Tap or press space to launch', bannerUntil:0,
+    levelClearT:0, over:false, rewardGiven:false, wonItemName:null
+  };
+  bb.balls.push(bbNewBall(bb));
+  return bb;
+}
+function bbSpeed(bb){ return BB_BASE_SPEED * Math.min(1.35, 1 + 0.06*(bb.level-1)); }
+function bbLaunch(){
+  const bb = state.brick;
+  if(!bb || bb.over || bb.levelClearT>0) return;
+  const sp = bbSpeed(bb);
+  bb.balls.forEach(b=>{
+    if(!b.stuck) return;
+    const rel = Math.max(-1, Math.min(1, b.offset/(bb.paddle.w/2)));
+    const ang = rel*0.5 + (Math.random()-0.5)*0.3;
+    b.vx = Math.sin(ang)*sp; b.vy = -Math.cos(ang)*sp; b.stuck = false;
+  });
+}
+function bbFixAngle(b, sp){
+  // Keep the ball from ever settling into a near-horizontal bounce that never comes back down.
+  const minVy = sp*0.32;
+  if(Math.abs(b.vy) < minVy){
+    b.vy = (b.vy<0?-1:1)*minVy;
+    b.vx = (b.vx<0?-1:1)*Math.sqrt(Math.max(0, sp*sp - minVy*minVy));
+  }
+  // ...and from bouncing perfectly straight up and down the same column forever.
+  const minVx = sp*0.12;
+  if(Math.abs(b.vx) < minVx) b.vx = (b.vx<0 ? -1 : (b.vx>0 ? 1 : (Math.random()<0.5?-1:1)))*minVx;
+  const cur = Math.hypot(b.vx, b.vy) || 1;
+  b.vx = b.vx/cur*sp; b.vy = b.vy/cur*sp;
+}
+function bbHitBrick(bb, brick){
+  brick.hp--;
+  bb.score += 5;
+  if(brick.hp<=0){
+    brick.alive = false;
+    bb.score += 5;
+    bb.bricksBroken++;
+    if(brick.power) bb.drops.push({ x: brick.x+brick.w/2, y: brick.y+brick.h/2, kind: brick.power });
+    if(bb.bricksBroken>=BB_REWARD_BRICKS && !bb.rewardGiven){
+      bb.rewardGiven = true;
+      const sevlingId = game.selectedBrickSevling;
+      if(sevlingId) awardSevlingItem(sevlingId).then(itemName=>{ bb.wonItemName = itemName; if(state.view==='arcade-brick') render(); });
+    }
   }
 }
-function renderMazeEscape(){
-  if(!state.mazeEscape) state.mazeEscape = newMazeEscape();
-  const me = state.mazeEscape;
-  const charId = game.selectedMazeEscapeSevling;
+function bbActivate(bb, kind){
+  const p = BB_POWERS[kind];
+  bb.banner = p.label; bb.bannerUntil = bb.time + 2;
+  if(kind==='wide') bb.wideUntil = bb.time + p.secs;
+  else if(kind==='sticky') bb.stickyUntil = bb.time + p.secs;
+  else if(kind==='laser'){ bb.laserUntil = bb.time + p.secs; bb.laserCooldown = 0; }
+  else if(kind==='multi'){
+    if(bb.balls.every(b=>b.stuck)) bbLaunch();
+    const sp = bbSpeed(bb);
+    const extra = [];
+    bb.balls.forEach(b=>{
+      if(b.stuck) return;
+      const base = Math.atan2(b.vx, -b.vy);
+      [-0.45, 0.45].forEach(d=>{ const a = base+d; extra.push({ x:b.x, y:b.y, r:b.r, stuck:false, offset:0, vx:Math.sin(a)*sp, vy:-Math.cos(a)*sp }); });
+    });
+    bb.balls = bb.balls.concat(extra).slice(0, 9);
+    bb.balls.forEach(b=>{ if(!b.stuck) bbFixAngle(b, sp); });
+  }
+}
+function bbStep(bb, dt){
+  bb.time += dt;
+  const pad = bb.paddle;
+  pad.w = BB_PADDLE_W * (bb.time < bb.wideUntil ? 1.6 : 1);
+  // Paddle movement: follow the finger/mouse directly, or slide with the arrow keys.
+  const keyDir = (heldKeys['ArrowRight']?1:0) - (heldKeys['ArrowLeft']?1:0);
+  if(keyDir){ bb.pointerX = null; pad.x += keyDir*520*dt; }
+  else if(bb.pointerX!=null){ pad.x += (bb.pointerX - pad.x) * Math.min(1, dt*18); }
+  pad.x = Math.max(pad.w/2, Math.min(BB_W - pad.w/2, pad.x));
+
+  if(bb.levelClearT>0){
+    bb.levelClearT -= dt;
+    if(bb.levelClearT<=0){
+      bb.level++;
+      bb.bricks = bbLevelLayout(bb.level);
+      bb.balls = [bbNewBall(bb)]; bb.drops = []; bb.bolts = [];
+      bb.banner = `Level ${bb.level}! Tap to launch`; bb.bannerUntil = bb.time + 2.5;
+    }
+    return;
+  }
+
+  // Lasers fire automatically from both ends of the paddle while the power lasts.
+  if(bb.time < bb.laserUntil){
+    bb.laserCooldown -= dt;
+    if(bb.laserCooldown<=0){
+      bb.laserCooldown = 0.35;
+      bb.bolts.push({ x: pad.x - pad.w/2 + 7, y: pad.y - 4 }, { x: pad.x + pad.w/2 - 7, y: pad.y - 4 });
+    }
+  }
+  bb.bolts.forEach(bolt=>{
+    bolt.y -= 620*dt;
+    for(const br of bb.bricks){
+      if(br.alive && bolt.x>=br.x && bolt.x<=br.x+br.w && bolt.y<=br.y+br.h && bolt.y>=br.y-12){ bbHitBrick(bb, br); bolt.dead = true; break; }
+    }
+    if(bolt.y < -12) bolt.dead = true;
+  });
+  bb.bolts = bb.bolts.filter(b=>!b.dead);
+
+  const sp = bbSpeed(bb);
+  const sticky = bb.time < bb.stickyUntil;
+  bb.balls.forEach(b=>{
+    if(b.stuck){ b.x = pad.x + b.offset; b.y = pad.y - b.r - 1; return; }
+    const steps = Math.max(1, Math.ceil(sp*dt/4));
+    for(let s=0; s<steps && !b.dead && !b.stuck; s++){
+      b.x += b.vx*dt/steps; b.y += b.vy*dt/steps;
+      if(b.x < b.r){ b.x = b.r; b.vx = Math.abs(b.vx); }
+      if(b.x > BB_W-b.r){ b.x = BB_W-b.r; b.vx = -Math.abs(b.vx); }
+      if(b.y < b.r){ b.y = b.r; b.vy = Math.abs(b.vy); }
+      // Paddle: where it lands on the paddle decides the bounce angle (up to 60 degrees).
+      if(b.vy>0 && b.y + b.r >= pad.y && b.y - b.r <= pad.y + pad.h && b.x >= pad.x - pad.w/2 - b.r && b.x <= pad.x + pad.w/2 + b.r){
+        const rel = Math.max(-1, Math.min(1, (b.x - pad.x)/(pad.w/2)));
+        if(sticky){
+          b.stuck = true; b.offset = b.x - pad.x; b.y = pad.y - b.r - 1; b.vx = 0; b.vy = 0;
+          bb.banner = 'Tap to let go'; bb.bannerUntil = bb.time + 1.5;
+        }else{
+          const ang = rel * (Math.PI/3) + (Math.random()-0.5)*0.2;
+          b.vx = Math.sin(ang)*sp; b.vy = -Math.cos(ang)*sp; b.y = pad.y - b.r;
+        }
+        continue;
+      }
+      for(const br of bb.bricks){
+        if(!br.alive) continue;
+        const cx = Math.max(br.x, Math.min(b.x, br.x+br.w));
+        const cy = Math.max(br.y, Math.min(b.y, br.y+br.h));
+        const nx = b.x - cx, ny = b.y - cy;
+        if(nx*nx + ny*ny < b.r*b.r){
+          if(nx===0 && ny===0) b.vy = -b.vy;
+          else if(Math.abs(nx) > Math.abs(ny)){ b.vx = Math.sign(nx)*Math.abs(b.vx); b.x = cx + Math.sign(nx)*b.r; }
+          else { b.vy = Math.sign(ny)*Math.abs(b.vy); b.y = cy + Math.sign(ny)*b.r; }
+          bbHitBrick(bb, br);
+          break;
+        }
+      }
+      if(b.y > BB_H + b.r*2) b.dead = true;
+    }
+    if(!b.dead && !b.stuck) bbFixAngle(b, sp);
+  });
+  bb.balls = bb.balls.filter(b=>!b.dead);
+
+  bb.drops.forEach(d=>{
+    d.y += 125*dt;
+    if(d.y + 14 >= pad.y && d.y - 14 <= pad.y + pad.h && d.x >= pad.x - pad.w/2 - 10 && d.x <= pad.x + pad.w/2 + 10){ d.dead = true; bbActivate(bb, d.kind); }
+    if(d.y > BB_H + 20) d.dead = true;
+  });
+  bb.drops = bb.drops.filter(d=>!d.dead);
+
+  if(!bb.balls.length){
+    bb.lives--;
+    if(bb.lives<=0){ bb.over = true; return; }
+    bb.balls = [bbNewBall(bb)];
+    bb.banner = `Oops! ${bb.lives} ${bb.lives===1?'life':'lives'} left, tap to launch`; bb.bannerUntil = bb.time + 2.5;
+  }
+  if(bb.bricks.every(br=>!br.alive)){
+    bb.levelClearT = 1.6; bb.balls = []; bb.drops = []; bb.bolts = [];
+    bb.banner = 'Wall cleared! \uD83C\uDF89'; bb.bannerUntil = bb.time + 1.6;
+  }
+}
+let bbBgCanvas = null;
+function bbBackground(dpr){
+  if(bbBgCanvas && bbBgCanvas._dpr===dpr) return bbBgCanvas;
+  const c = document.createElement('canvas');
+  c.width = BB_W*dpr; c.height = BB_H*dpr; c._dpr = dpr;
+  const x = c.getContext('2d'); x.scale(dpr, dpr);
+  x.fillStyle = FOIL.bg; x.fillRect(0,0,BB_W,BB_H);
+  [[0.1,0.1,FOIL.pink],[0.9,0.15,FOIL.blue],[0.12,0.9,FOIL.lime],[0.88,0.85,FOIL.gold]].forEach(([px,py,col])=>{
+    const g = x.createRadialGradient(px*BB_W, py*BB_H, 0, px*BB_W, py*BB_H, BB_W*0.45);
+    g.addColorStop(0, col+'33'); g.addColorStop(1, col+'00');
+    x.fillStyle = g; x.fillRect(0,0,BB_W,BB_H);
+  });
+  x.fillStyle = 'rgba(34,26,61,0.07)';
+  for(let gy=12; gy<BB_H; gy+=24) for(let gx=12; gx<BB_W; gx+=24) x.fillRect(gx-1, gy-1, 2, 2);
+  bbBgCanvas = c;
+  return c;
+}
+function bbDraw(bb){
+  const cv = prepCanvas('bb-canvas', BB_W, BB_H);
+  if(!cv) return;
+  const { ctx, dpr } = cv;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.drawImage(bbBackground(dpr), 0, 0);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  // Bricks as stickers; power-up bricks get the holographic foil finish and their icon.
+  bb.bricks.forEach(br=>{
+    if(!br.alive) return;
+    const fill = br.power ? holoGradient(ctx, br.x, br.y, br.x+br.w, br.y+br.h) : br.colour;
+    stickerRect(ctx, br.x, br.y, br.w, br.h, 6, fill, 2);
+    if(br.maxHp>1){
+      ctx.strokeStyle = FOIL.ink; ctx.lineWidth = 2;
+      rrPath(ctx, br.x+4, br.y+4, br.w-8, br.h-8, 4); ctx.stroke();
+      if(br.hp<br.maxHp){
+        ctx.beginPath(); ctx.moveTo(br.x+br.w*0.3, br.y+2); ctx.lineTo(br.x+br.w*0.45, br.y+br.h*0.55); ctx.lineTo(br.x+br.w*0.38, br.y+br.h-2); ctx.stroke();
+      }
+    }
+    if(br.power){
+      ctx.font = `14px ${GAME_EMOJI_FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(BB_POWERS[br.power].emoji, br.x+br.w/2, br.y+br.h/2+1);
+    }
+  });
+  // Falling power-ups
+  bb.drops.forEach(d=>{
+    ctx.fillStyle = FOIL.ink; ctx.beginPath(); ctx.arc(d.x+2, d.y+2, 14, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = BB_POWERS[d.kind].colour; ctx.beginPath(); ctx.arc(d.x, d.y, 14, 0, Math.PI*2); ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = FOIL.ink; ctx.stroke();
+    ctx.font = `15px ${GAME_EMOJI_FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(BB_POWERS[d.kind].emoji, d.x, d.y+1);
+  });
+  // Laser bolts
+  ctx.fillStyle = FOIL.pink;
+  bb.bolts.forEach(bolt=>{ rrPath(ctx, bolt.x-2, bolt.y-12, 4, 12, 2); ctx.fill(); });
+  // Paddle
+  const pad = bb.paddle;
+  const px = pad.x - pad.w/2;
+  if(bb.time < bb.laserUntil){
+    stickerRect(ctx, px+1, pad.y-8, 12, 12, 3, FOIL.ink, 0);
+    stickerRect(ctx, px+pad.w-13, pad.y-8, 12, 12, 3, FOIL.ink, 0);
+    ctx.fillStyle = FOIL.pink; ctx.fillRect(px+5, pad.y-10, 4, 4); ctx.fillRect(px+pad.w-9, pad.y-10, 4, 4);
+  }
+  stickerRect(ctx, px, pad.y, pad.w, pad.h, pad.h/2, holoGradient(ctx, px, 0, px+pad.w, 0), 3);
+  if(bb.time < bb.stickyUntil){
+    ctx.strokeStyle = FOIL.lime; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(px+8, pad.y+1); ctx.lineTo(px+pad.w-8, pad.y+1); ctx.stroke();
+  }
+  // Balls
+  bb.balls.forEach(b=>{
+    ctx.fillStyle = FOIL.ink; ctx.beginPath(); ctx.arc(b.x+2, b.y+2, b.r, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = FOIL.white; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = FOIL.ink; ctx.stroke();
+    ctx.fillStyle = FOIL.blue; ctx.beginPath(); ctx.arc(b.x-2.5, b.y-2.5, 2.2, 0, Math.PI*2); ctx.fill();
+  });
+  // Banner message
+  if(bb.time < bb.bannerUntil || bb.balls.some(b=>b.stuck)){
+    const msg = bb.time < bb.bannerUntil ? bb.banner : 'Tap to launch';
+    ctx.font = `700 18px 'Baloo 2', sans-serif`;
+    const w = Math.min(BB_W-40, ctx.measureText(msg).width + 32);
+    stickerRect(ctx, BB_W/2 - w/2, BB_H*0.6 - 18, w, 36, 18, FOIL.white, 3);
+    ctx.fillStyle = FOIL.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(msg, BB_W/2, BB_H*0.6+1);
+  }
+  // Keep the Sevling face badge sitting on the middle of the paddle
+  const face = document.getElementById('bb-face');
+  if(face){ face.style.left = (pad.x/BB_W*100)+'%'; face.style.top = ((pad.y+pad.h/2)/BB_H*100)+'%'; }
+}
+function bbLoopStep(dt){
+  const bb = state.brick;
+  if(state.view!=='arcade-brick' || !bb) return false;
+  bbStep(bb, dt);
+  bbDraw(bb);
+  setTextIfChanged('bb-lives', '\u2764\uFE0F'.repeat(Math.max(0,bb.lives)) || '0');
+  setTextIfChanged('bb-score', String(bb.score));
+  setTextIfChanged('bb-level', String(bb.level));
+  if(bb.over){ render(); return false; }
+  return true;
+}
+function renderBrickBreaker(){
+  if(!state.brick) state.brick = newBrickBreaker();
+  const bb = state.brick;
+  const charId = game.selectedBrickSevling;
   const charSevling = charId ? SEVLINGS.find(x=>x.id===charId) : null;
   const hasTime = (game.arcadeMs||0) > 0;
-  const cellPctX = 100/me.cols, cellPctY = 100/me.rows;
-  let cellsHtml = '';
-  for(let y=0;y<me.rows;y++){
-    for(let x=0;x<me.cols;x++){
-      const isGoal = (x===me.cols-1 && y===me.rows-1);
-      const top = mazeEscapeWallAt(me.maze,x,y,'top');
-      const bottom = mazeEscapeWallAt(me.maze,x,y,'bottom');
-      const left = mazeEscapeWallAt(me.maze,x,y,'left');
-      const right = isGoal ? false : mazeEscapeWallAt(me.maze,x,y,'right');
-      const style = `position:absolute;left:${x*cellPctX}%;top:${y*cellPctY}%;width:${cellPctX}%;height:${cellPctY}%;box-sizing:border-box;border-top:2px solid ${top?'var(--ink)':'transparent'};border-bottom:2px solid ${bottom?'var(--ink)':'transparent'};border-left:2px solid ${left?'var(--ink)':'transparent'};border-right:2px solid ${right?'var(--ink)':'transparent'};`;
-      const marker = isGoal ? `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:60%;">\uD83C\uDFC1</div>` : '';
-      cellsHtml += `<div style="${style}">${marker}</div>`;
-    }
-  }
-  const playerInner = charSevling ? sevlingIcon(charSevling,false,true) : `<div style="width:100%;height:100%;border-radius:50%;background:#FFD447;"></div>`;
-  const playerHtml = `<div style="position:absolute;left:${me.player.x*cellPctX}%;top:${me.player.y*cellPctY}%;width:${cellPctX}%;height:${cellPctY}%;box-sizing:border-box;padding:2px;z-index:3;"><div style="width:100%;height:100%;border-radius:50%;overflow:hidden;background:#fff;border:2px solid var(--ink);">${playerInner}</div></div>`;
   app.innerHTML = `
     <button class="btn-ghost" id="btn-back-arcade">\u2190 Back to Arcade</button>
-    <h2 class="section-title">Maze Escape</h2>
-    <p class="progress" style="text-align:center;">Moves: ${me.moves} &nbsp;\u00B7&nbsp; Arcade time left: <span id="arcade-timer">${formatMs(game.arcadeMs||0)}</span></p>
-    ${me.over ? `<div class="card"><p class="muted" style="text-align:center;margin:0;">You escaped in ${me.moves} moves and ${me.elapsedSec}s! \uD83C\uDF89</p></div>` : ''}
-    ${me.wonItemName ? `<div class="card reward-card" style="border-top-color:var(--gold);"><p class="muted" style="text-align:center;margin:0;">\uD83C\uDF81 You won ${escapeHtml(me.wonItemName)} for ${escapeHtml(charSevling?charSevling.name:'your Sevling')}! Happiness +15</p></div>` : ''}
-    ${(!hasTime) ? `<div class="card"><p class="muted" style="text-align:center;font-size:0.85rem;margin:0;">${me.over ? 'Out of arcade time, score 90%+ three times on a list to earn more!' : 'Your arcade time has run out, but you can finish this maze.'}</p></div>` : ''}
-    <div class="card" style="padding:0.5rem;">
-      <div style="width:100%;max-width:560px;margin:0 auto;position:relative;">
-        <div style="padding-bottom:${(me.rows/me.cols*100).toFixed(2)}%;"></div>
-        <div style="position:absolute;top:0;left:0;right:0;bottom:0;background:var(--bg);border-radius:12px;overflow:hidden;">${cellsHtml}${playerHtml}</div>
+    <h2 class="section-title">Brick Breaker</h2>
+    <p class="progress" style="text-align:center;">Level <span id="bb-level">${bb.level}</span> &nbsp;\u00B7&nbsp; Score <span id="bb-score">${bb.score}</span> &nbsp;\u00B7&nbsp; <span id="bb-lives">${'\u2764\uFE0F'.repeat(Math.max(0,bb.lives))}</span> &nbsp;\u00B7&nbsp; Arcade time left: <span id="arcade-timer">${formatMs(game.arcadeMs||0)}</span></p>
+    ${bb.wonItemName ? `<div class="card reward-card" style="border-top-color:var(--gold);"><p class="muted" style="text-align:center;margin:0;">\uD83C\uDF81 You won ${escapeHtml(bb.wonItemName)} for ${escapeHtml(charSevling?charSevling.name:'your Sevling')}! Happiness +15</p></div>` : ''}
+    ${bb.over ? `<div class="card"><p class="muted" style="text-align:center;margin:0;">Game over! You broke ${bb.bricksBroken} brick${bb.bricksBroken===1?'':'s'} and scored ${bb.score}.</p></div>` : ''}
+    ${(!hasTime) ? `<div class="card"><p class="muted" style="text-align:center;font-size:0.85rem;margin:0;">${bb.over ? 'Out of arcade time, score 90%+ three times on a list to earn more!' : 'Your arcade time has run out, but you can finish this game.'}</p></div>` : ''}
+    <div class="card game-card">
+      <div class="game-stage" style="aspect-ratio:${BB_W}/${BB_H};">
+        <canvas id="bb-canvas" class="game-canvas" aria-label="Brick Breaker board, drag to move the paddle, tap to launch"></canvas>
+        ${charSevling ? `<div id="bb-face" class="game-face" style="width:${(34/BB_W*100).toFixed(2)}%;">${sevlingIcon(charSevling,false,true)}</div>` : ''}
       </div>
     </div>
-    <div style="max-width:260px;margin:1rem auto 0;display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem;">
-      <div></div><button class="btn-secondary" id="me-up" style="font-size:1.6rem;padding:1.1rem 0;">\u2191</button><div></div>
-      <button class="btn-secondary" id="me-left" style="font-size:1.6rem;padding:1.1rem 0;">\u2190</button><div></div><button class="btn-secondary" id="me-right" style="font-size:1.6rem;padding:1.1rem 0;">\u2192</button>
-      <div></div><button class="btn-secondary" id="me-down" style="font-size:1.6rem;padding:1.1rem 0;">\u2193</button><div></div>
-    </div>
+    <p class="muted" style="text-align:center;margin:0.2rem 0 0;">Slide your finger along the board to move, tap to launch. Catch the falling icons for power-ups.</p>
     <div class="btn-row" style="margin-top:1rem;justify-content:center;">
-      <button class="btn-secondary" id="btn-me-restart" ${hasTime?'':'disabled'}>New maze</button>
+      <button class="btn-secondary" id="btn-bb-restart" ${hasTime?'':'disabled'}>New game</button>
     </div>
   `;
   document.getElementById('btn-back-arcade').onclick = ()=>{ stopAllArcadeIntervals(); state.view='arcade'; render(); };
-  document.getElementById('btn-me-restart').onclick = ()=>{ if((game.arcadeMs||0)<=0) return; stopAllArcadeIntervals(); state.mazeEscape = newMazeEscape(); render(); };
-  document.getElementById('me-up').onclick = ()=>mazeEscapeMove(0,-1);
-  document.getElementById('me-down').onclick = ()=>mazeEscapeMove(0,1);
-  document.getElementById('me-left').onclick = ()=>mazeEscapeMove(-1,0);
-  document.getElementById('me-right').onclick = ()=>mazeEscapeMove(1,0);
-  if(!me.over && hasTime) startArcadeCountdown(()=>render());
-  else if(me.over) stopAllArcadeIntervals();
+  document.getElementById('btn-bb-restart').onclick = ()=>{ if((game.arcadeMs||0)<=0) return; stopAllArcadeIntervals(); state.brick = newBrickBreaker(); render(); };
+  const canvas = document.getElementById('bb-canvas');
+  const toLogicalX = (e)=>{ const r = canvas.getBoundingClientRect(); return (e.clientX - r.left) / r.width * BB_W; };
+  canvas.onpointerdown = (e)=>{ e.preventDefault(); try{ canvas.setPointerCapture(e.pointerId); }catch(_){} if(state.brick) state.brick.pointerX = toLogicalX(e); bbLaunch(); };
+  canvas.onpointermove = (e)=>{ if(state.brick && (e.pointerType==='mouse' || e.buttons)) state.brick.pointerX = toLogicalX(e); };
+  bbDraw(bb);
+  if(!bb.over){
+    startArcadeRaf(bbLoopStep);
+    if(hasTime) startArcadeCountdown(()=>render());
+  }else{
+    stopAllArcadeIntervals();
+  }
+}
+
+// ---- Overhead Racer ----
+// Top-down racing on a winding neon track against two computer cars. Every 10 seconds of
+// racing the race pauses for a spelling from the chosen list(s); a correct answer (graded by
+// the same gradeSpelling() as practice mode) gives a turbo boost. The arcade clock is paused
+// while a spelling question is on screen, so spelling never eats into play time.
+const RACER_VIEW = 480;           // logical canvas size (square)
+const RACER_ZOOM = 0.8;           // canvas px per world unit
+const RACER_HALF_W = 62;          // half the track width
+const RACER_BARRIER = 30;         // soft cushion beyond the track edge before the car is held back
+const RACER_LAPS = 3;
+const RACER_MAX_SPEED = 260;
+const RACER_PROMPT_EVERY = 10;    // seconds of racing between spelling questions
+const RACER_SPACING = 12;         // world units between centreline samples
+const RACER_CONTROL_POINTS = [[300,250],[750,180],[1150,280],[1480,260],[1640,520],[1480,780],[1140,790],[980,960],[1160,1150],[1500,1200],[1580,1420],[1250,1540],[800,1500],[540,1320],[640,1040],[440,840],[230,740],[190,470]];
+const RACER_DIFFICULTY = {
+  gentle: { label:'Gentle', ai:0.78, assist:2.0, maxDev:1.15, leadBrake:[[20,0.82],[50,0.68],[110,0.55]], catchUp:1.04 },
+  speedy: { label:'Speedy', ai:0.88, assist:0.7, maxDev:1.9, leadBrake:[[40,0.9],[100,0.8]], catchUp:1.06 }
+};
+const RACER_BOOSTS = [[0.1,0],[0.36,22],[0.6,-22],[0.84,0]];      // [fraction round the lap, lane offset]
+const RACER_OILS = [[0.23,-26],[0.48,26],[0.72,-18],[0.95,20]];
+let racerTrackCache = null;
+function racerBuildTrack(){
+  if(racerTrackCache) return racerTrackCache;
+  const ctrl = RACER_CONTROL_POINTS, n = ctrl.length, raw = [];
+  for(let i=0;i<n;i++){
+    const p0=ctrl[(i-1+n)%n], p1=ctrl[i], p2=ctrl[(i+1)%n], p3=ctrl[(i+2)%n];
+    for(let s=0;s<30;s++){
+      const t=s/30, t2=t*t, t3=t2*t;
+      const cr = (a,b,c,d)=>0.5*((2*b)+(-a+c)*t+(2*a-5*b+4*c-d)*t2+(-a+3*b-3*c+d)*t3);
+      raw.push([cr(p0[0],p1[0],p2[0],p3[0]), cr(p0[1],p1[1],p2[1],p3[1])]);
+    }
+  }
+  let total = 0; const cum = [0];
+  for(let i=1;i<=raw.length;i++){ const a=raw[i-1], b=raw[i%raw.length]; total += Math.hypot(b[0]-a[0], b[1]-a[1]); cum.push(total); }
+  const N = Math.round(total/RACER_SPACING), pts = [];
+  let j = 0;
+  for(let k=0;k<N;k++){
+    const d = k*total/N;
+    while(cum[j+1] < d) j++;
+    const a=raw[j], b=raw[(j+1)%raw.length], f=(d-cum[j])/((cum[j+1]-cum[j])||1);
+    pts.push({ x:a[0]+(b[0]-a[0])*f, y:a[1]+(b[1]-a[1])*f });
+  }
+  // Shift so there's a margin round the whole track, and the camera never looks past the edge.
+  const margin = RACER_VIEW/RACER_ZOOM/2 + 20;
+  const minX = Math.min(...pts.map(p=>p.x)), minY = Math.min(...pts.map(p=>p.y));
+  pts.forEach(p=>{ p.x += margin - minX; p.y += margin - minY; });
+  const worldW = Math.max(...pts.map(p=>p.x)) + margin, worldH = Math.max(...pts.map(p=>p.y)) + margin;
+  pts.forEach((p,i)=>{
+    const a = pts[(i-1+N)%N], b = pts[(i+1)%N];
+    p.ang = Math.atan2(b.y-a.y, b.x-a.x);
+    p.nx = -Math.sin(p.ang); p.ny = Math.cos(p.ang);
+  });
+  const place = (frac, lane)=>{ const p = pts[Math.floor(frac*N)%N]; return { x:p.x+p.nx*lane, y:p.y+p.ny*lane, ang:p.ang, idx:Math.floor(frac*N)%N }; };
+  racerTrackCache = { pts, N, worldW, worldH, boosts: RACER_BOOSTS.map(([f,l])=>place(f,l)), oils: RACER_OILS.map(([f,l])=>place(f,l)), image:null, imageScale:0 };
+  return racerTrackCache;
+}
+function racerTrackImage(track, scale){
+  if(track.image && track.imageScale===scale) return track.image;
+  const c = document.createElement('canvas');
+  c.width = Math.round(track.worldW*scale); c.height = Math.round(track.worldH*scale);
+  const x = c.getContext('2d'); x.scale(scale, scale);
+  // Infield: the app's lavender-white with soft holo blooms and a sticker-sheet dot grid.
+  x.fillStyle = FOIL.bg; x.fillRect(0,0,track.worldW,track.worldH);
+  [[0.15,0.15,FOIL.pink],[0.85,0.2,FOIL.blue],[0.2,0.85,FOIL.lime],[0.8,0.8,FOIL.gold],[0.5,0.5,FOIL.blue]].forEach(([px,py,col])=>{
+    const g = x.createRadialGradient(px*track.worldW, py*track.worldH, 0, px*track.worldW, py*track.worldH, 520);
+    g.addColorStop(0, col+'30'); g.addColorStop(1, col+'00');
+    x.fillStyle = g; x.fillRect(0,0,track.worldW,track.worldH);
+  });
+  x.fillStyle = 'rgba(34,26,61,0.08)';
+  for(let gy=20; gy<track.worldH; gy+=40) for(let gx=20; gx<track.worldW; gx+=40) x.fillRect(gx-1.5, gy-1.5, 3, 3);
+  const loop = (offset)=>{ x.beginPath(); track.pts.forEach((p,i)=>{ const px=p.x+p.nx*offset, py=p.y+p.ny*offset; if(i) x.lineTo(px,py); else x.moveTo(px,py); }); x.closePath(); };
+  x.lineJoin = 'round'; x.lineCap = 'round';
+  // Hard ink offset shadow under the whole track, like the app's sticker cards.
+  x.save(); x.translate(6,6); loop(0); x.strokeStyle = FOIL.ink; x.lineWidth = RACER_HALF_W*2+10; x.stroke(); x.restore();
+  loop(0); x.strokeStyle = FOIL.ink; x.lineWidth = RACER_HALF_W*2+10; x.stroke();
+  loop(0); x.strokeStyle = '#2E2452'; x.lineWidth = RACER_HALF_W*2-6; x.stroke();
+  // Neon edges: pink on one side, blue on the other, with a glow.
+  [[-RACER_HALF_W+4, FOIL.pink],[RACER_HALF_W-4, FOIL.blue]].forEach(([off,col])=>{
+    x.save(); x.shadowColor = col; x.shadowBlur = 16; loop(off); x.strokeStyle = col; x.lineWidth = 5; x.stroke(); x.restore();
+    loop(off); x.strokeStyle = '#FFFFFF'; x.globalAlpha = 0.7; x.lineWidth = 1.5; x.stroke(); x.globalAlpha = 1;
+  });
+  // Dashed gold centre line
+  x.save(); x.setLineDash([18,22]); loop(0); x.strokeStyle = 'rgba(255,212,71,0.55)'; x.lineWidth = 3; x.stroke(); x.restore();
+  // Start / finish line, chequered
+  const s = track.pts[0];
+  x.save(); x.translate(s.x, s.y); x.rotate(s.ang);
+  const sq = 10;
+  for(let row=0; row<2; row++) for(let k=-RACER_HALF_W+2; k<RACER_HALF_W-2; k+=sq){
+    x.fillStyle = (Math.floor(k/sq)+row)%2 ? FOIL.white : FOIL.ink;
+    x.fillRect(-sq+row*sq, k, sq, sq);
+  }
+  x.restore();
+  // Oil slicks: dark pools with a holographic sheen
+  track.oils.forEach(o=>{
+    x.save(); x.translate(o.x, o.y); x.rotate(o.ang);
+    x.fillStyle = '#0E0A1C'; x.beginPath(); x.ellipse(0,0,30,22,0,0,Math.PI*2); x.fill();
+    x.beginPath(); x.ellipse(-16,10,12,9,0.4,0,Math.PI*2); x.fill();
+    const g = x.createLinearGradient(-24,-14,24,14);
+    g.addColorStop(0,'rgba(255,62,165,0.55)'); g.addColorStop(0.5,'rgba(0,194,255,0.5)'); g.addColorStop(1,'rgba(196,255,61,0.45)');
+    x.strokeStyle = g; x.lineWidth = 5; x.beginPath(); x.ellipse(2,-2,18,11,0,0,Math.PI*2); x.stroke();
+    x.strokeStyle = 'rgba(255,255,255,0.75)'; x.lineWidth = 2; x.beginPath(); x.ellipse(0,0,30,22,0,0,Math.PI*2); x.stroke();
+    x.fillStyle = 'rgba(255,255,255,0.85)'; x.beginPath(); x.arc(-8,-8,3,0,Math.PI*2); x.fill(); x.beginPath(); x.arc(10,4,2,0,Math.PI*2); x.fill();
+    x.restore();
+  });
+  // Booster pads: gold sticker plates with ink chevrons pointing the way
+  track.boosts.forEach(b=>{
+    x.save(); x.translate(b.x, b.y); x.rotate(b.ang);
+    x.fillStyle = FOIL.ink; rrPath(x, -26, -17, 56, 38, 8); x.fill();
+    x.fillStyle = FOIL.gold; rrPath(x, -29, -20, 56, 38, 8); x.fill();
+    x.strokeStyle = FOIL.ink; x.lineWidth = 2; x.stroke();
+    x.fillStyle = FOIL.ink;
+    [-14, 2].forEach(cx=>{ x.beginPath(); x.moveTo(cx,-11); x.lineTo(cx+12,-1); x.lineTo(cx,9); x.lineTo(cx+5,-1); x.closePath(); x.fill(); });
+    x.restore();
+  });
+  track.image = c; track.imageScale = scale;
+  return c;
+}
+function racerNearestIdx(track, car){
+  let best = car.idx, bestD = Infinity;
+  for(let k=-20; k<=40; k++){
+    const i = (car.idx + k + track.N) % track.N, p = track.pts[i];
+    const d = (p.x-car.x)**2 + (p.y-car.y)**2;
+    if(d < bestD){ bestD = d; best = i; }
+  }
+  return best;
+}
+function angleDiff(a, b){ let d = a - b; while(d > Math.PI) d -= Math.PI*2; while(d < -Math.PI) d += Math.PI*2; return d; }
+function newRacerCar(track, lane, colour, isPlayer, name){
+  const p = track.pts[4];
+  return { x:p.x+p.nx*lane, y:p.y+p.ny*lane, angle:p.ang, speed:0, idx:4, laps:0, colour, isPlayer, name,
+    turboT:0, turboMul:1, spinT:0, spinHeading:0, spinAngle:0, hazardCooldown:0, offTrack:false,
+    lane, lanePhase:Math.random()*Math.PI*2, finished:false, finishOrder:0 };
+}
+function newRacer(pool, difficulty){
+  const track = racerBuildTrack();
+  return {
+    track, difficulty: RACER_DIFFICULTY[difficulty] ? difficulty : 'gentle',
+    cars: [ newRacerCar(track, -36, FOIL.pink, true, 'You'), newRacerCar(track, 0, FOIL.blue, false, 'Blue'), newRacerCar(track, 36, FOIL.gold, false, 'Gold') ],
+    phase:'countdown', countdown:3.4, time:0, sincePrompt:0, pool: shuffle(pool), poolIdx:0,
+    prompt:null, finishCount:0, place:0, boostsEarned:0, questions:0, steerTouch:0,
+    banner:'', bannerUntil:0, wonItemName:null
+  };
+}
+function racerProgress(track, car){ return car.laps*track.N + car.idx; }
+function racerUpdateCar(r, car, dt, steerInput){
+  const track = r.track;
+  const cfg = RACER_DIFFICULTY[r.difficulty];
+  if(car.hazardCooldown>0) car.hazardCooldown -= dt;
+  if(car.turboT>0) car.turboT -= dt;
+  if(car.spinT>0){
+    // Spinning out on oil: the car twirls, slows right down, then carries on in its old direction.
+    car.spinT -= dt;
+    car.spinAngle += dt*13;
+    car.speed += (RACER_MAX_SPEED*0.25 - car.speed) * Math.min(1, dt*4);
+    car.x += Math.cos(car.spinHeading)*car.speed*dt; car.y += Math.sin(car.spinHeading)*car.speed*dt;
+    car.angle = car.spinHeading + car.spinAngle;
+    if(car.spinT<=0){ car.angle = car.spinHeading; car.hazardCooldown = 1.2; }
+  }else{
+    let target;
+    if(car.isPlayer){
+      target = RACER_MAX_SPEED;
+      const turnRate = 3.2 * Math.min(1, car.speed/110);
+      car.angle += steerInput * turnRate * dt;
+      if(!steerInput){
+        // Steering assist: with no input the car gently aims at the track a little way ahead.
+        const ahead = track.pts[(car.idx + 8) % track.N];
+        const want = Math.atan2(ahead.y - car.y, ahead.x - car.x);
+        const d = angleDiff(want, car.angle);
+        car.angle += Math.max(-cfg.assist*dt, Math.min(cfg.assist*dt, d));
+      }
+      // The car can never turn to face backwards (gentle keeps it within about 65 degrees of the
+      // track's direction), so over-steering slows you down but never sends you the wrong way.
+      const trackAng = track.pts[car.idx].ang;
+      const dev = angleDiff(car.angle, trackAng);
+      if(Math.abs(dev) > cfg.maxDev) car.angle = trackAng + Math.sign(dev)*cfg.maxDev;
+    }else{
+      const lane = car.lane*0.5 + Math.sin(r.time*0.45 + car.lanePhase)*20;
+      const aim = track.pts[(car.idx + 10) % track.N];
+      const want = Math.atan2(aim.y + aim.ny*lane - car.y, aim.x + aim.nx*lane - car.x);
+      const d = angleDiff(want, car.angle);
+      car.angle += Math.max(-3.6*dt, Math.min(3.6*dt, d));
+      const bend = Math.abs(angleDiff(track.pts[(car.idx+22)%track.N].ang, track.pts[car.idx].ang));
+      target = RACER_MAX_SPEED * cfg.ai * (1 - Math.min(0.28, bend*0.35));
+      // Rubber-banding, weighted in the player's favour: computer cars ease off when ahead.
+      const player = r.cars[0];
+      const gap = racerProgress(track, car) - racerProgress(track, player);
+      let band = 1;
+      cfg.leadBrake.forEach(([g,m])=>{ if(gap > g) band = m; });
+      if(gap < -90) band = cfg.catchUp;
+      if(!player.finished) target *= band;
+    }
+    if(car.offTrack) target *= 0.5;
+    if(car.turboT>0) target *= car.turboMul;
+    const accel = target > car.speed ? 200 : 320;
+    car.speed += Math.max(-accel*dt, Math.min(accel*dt, target - car.speed));
+    car.x += Math.cos(car.angle)*car.speed*dt; car.y += Math.sin(car.angle)*car.speed*dt;
+  }
+  // Where are we on the track? Lap counting happens when we cross the start line.
+  const prev = car.idx;
+  car.idx = racerNearestIdx(track, car);
+  if(prev > track.N*0.7 && car.idx < track.N*0.3) car.laps++;
+  else if(prev < track.N*0.3 && car.idx > track.N*0.7) car.laps--;
+  const c = track.pts[car.idx];
+  const lat = (car.x - c.x)*c.nx + (car.y - c.y)*c.ny;
+  car.offTrack = Math.abs(lat) > RACER_HALF_W;
+  const limit = RACER_HALF_W + RACER_BARRIER;
+  if(Math.abs(lat) > limit){
+    const push = Math.abs(lat) - limit;
+    car.x -= Math.sign(lat)*c.nx*push; car.y -= Math.sign(lat)*c.ny*push;
+    car.speed = Math.min(car.speed, RACER_MAX_SPEED*0.45);
+  }
+  // Hazards and boosters
+  if(car.spinT<=0){
+    track.boosts.forEach(b=>{
+      const dx = car.x-b.x, dy = car.y-b.y;
+      const along = dx*Math.cos(b.ang) + dy*Math.sin(b.ang), across = -dx*Math.sin(b.ang) + dy*Math.cos(b.ang);
+      if(Math.abs(along) < 32 && Math.abs(across) < 24){
+        if(car.turboT < 1.3){ car.turboT = 1.3; car.turboMul = 1.4; }
+        car.speed = Math.max(car.speed, RACER_MAX_SPEED*1.2);
+        if(car.isPlayer){ r.banner = 'Boost! \uD83D\uDE80'; r.bannerUntil = r.time + 1; }
+      }
+    });
+    if(car.hazardCooldown<=0){
+      track.oils.forEach(o=>{
+        if(car.spinT<=0 && Math.hypot(car.x-o.x, car.y-o.y) < 28){
+          car.spinT = 0.9; car.spinHeading = car.angle; car.spinAngle = 0; car.turboT = 0;
+          if(car.isPlayer){ r.banner = 'Oil! Wheee! \uD83C\uDF00'; r.bannerUntil = r.time + 1.2; }
+        }
+      });
+    }
+  }
+  if(!car.finished && car.laps >= RACER_LAPS){
+    car.finished = true; r.finishCount++; car.finishOrder = r.finishCount;
+  }
+}
+function racerStep(r, dt){
+  if(r.prompt || r.phase==='finished') return;
+  r.time += dt;
+  if(r.phase==='countdown'){
+    r.countdown -= dt;
+    if(r.countdown <= 0){ r.phase = 'racing'; r.banner = 'Go! \uD83C\uDFC1'; r.bannerUntil = r.time + 1; }
+    return;
+  }
+  const steer = r.steerTouch || ((heldKeys['ArrowRight']?1:0) - (heldKeys['ArrowLeft']?1:0));
+  r.cars.forEach(car=>racerUpdateCar(r, car, dt, car.isPlayer ? steer : 0));
+  // Gentle bumps between cars, no damage, just nudged apart.
+  for(let i=0;i<r.cars.length;i++) for(let j=i+1;j<r.cars.length;j++){
+    const a = r.cars[i], b = r.cars[j];
+    const dx = b.x-a.x, dy = b.y-a.y, d = Math.hypot(dx,dy);
+    if(d > 0 && d < 24){ const push = (24-d)/2; a.x -= dx/d*push; a.y -= dy/d*push; b.x += dx/d*push; b.y += dy/d*push; }
+  }
+  const player = r.cars[0];
+  if(player.finished){
+    r.phase = 'finished';
+    r.place = player.finishOrder;
+    const sevlingId = game.selectedRacerSevling;
+    if(sevlingId) awardSevlingItem(sevlingId).then(itemName=>{ r.wonItemName = itemName; if(state.view==='arcade-racer' && state.racer===r) render(); });
+    r.needsRender = true;
+    return;
+  }
+  if(r.pool.length){
+    r.sincePrompt += dt;
+    if(r.sincePrompt >= RACER_PROMPT_EVERY) racerOpenPrompt(r);
+  }
+}
+function racerPositions(r){
+  return r.cars.slice().sort((a,b)=>{
+    if(a.finished && b.finished) return a.finishOrder - b.finishOrder;
+    if(a.finished) return -1; if(b.finished) return 1;
+    return racerProgress(r.track, b) - racerProgress(r.track, a);
+  });
+}
+function racerDrawCar(ctx, car){
+  ctx.save(); ctx.translate(car.x, car.y);
+  if(car.turboT>0 && car.spinT<=0){
+    // Holographic turbo trail
+    ctx.save(); ctx.rotate(car.angle);
+    [[-26,8,FOIL.gold],[-36,6,FOIL.pink],[-45,4,FOIL.blue]].forEach(([tx,rad,col])=>{ ctx.globalAlpha = 0.85; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(tx + Math.random()*3, (Math.random()-0.5)*4, rad, 0, Math.PI*2); ctx.fill(); });
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+  ctx.scale(1.2, 1.2);
+  ctx.save(); ctx.translate(3,3); ctx.rotate(car.angle); ctx.fillStyle = FOIL.ink; rrPath(ctx, -17, -10, 34, 20, 7); ctx.fill(); ctx.restore();
+  ctx.rotate(car.angle);
+  ctx.fillStyle = FOIL.ink;
+  [[-12,-12],[6,-12],[-12,8],[6,8]].forEach(([wx,wy])=>{ rrPath(ctx, wx, wy, 9, 4, 2); ctx.fill(); });
+  ctx.fillStyle = car.colour; rrPath(ctx, -17, -10, 34, 20, 7); ctx.fill();
+  ctx.lineWidth = 2; ctx.strokeStyle = FOIL.ink; ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.9)'; rrPath(ctx, 4, -7, 7, 14, 3); ctx.fill(); ctx.strokeStyle = FOIL.ink; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.fillStyle = FOIL.ink; ctx.fillRect(-17, -8, 3, 16);
+  if(car.isPlayer){ ctx.fillStyle = FOIL.white; ctx.fillRect(-12, -2, 14, 4); }
+  ctx.restore();
+}
+function racerDraw(r){
+  const cv = prepCanvas('racer-canvas', RACER_VIEW, RACER_VIEW);
+  if(!cv) return;
+  const { ctx, dpr } = cv;
+  const track = r.track;
+  const player = r.cars[0];
+  const half = RACER_VIEW/RACER_ZOOM/2;
+  const camX = Math.max(half, Math.min(track.worldW - half, player.x));
+  const camY = Math.max(half, Math.min(track.worldH - half, player.y));
+  // The pre-drawn track image is capped at about 8 million pixels, comfortably inside iOS canvas limits.
+  const img = racerTrackImage(track, Math.min(dpr, Math.sqrt(8e6/(track.worldW*track.worldH))));
+  const sc = img.width / track.worldW;
+  const sx = Math.max(0, (camX-half)*sc), sy = Math.max(0, (camY-half)*sc);
+  const sw = Math.min(half*2*sc, img.width - sx), sh = Math.min(half*2*sc, img.height - sy);
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cv.c.width, cv.c.height);
+  const z = RACER_ZOOM*dpr;
+  ctx.setTransform(z,0,0,z, (half-camX)*z, (half-camY)*z);
+  // Pulse the booster pads so they read as "go faster" spots
+  const pulse = 0.25 + 0.2*Math.sin(r.time*6);
+  track.boosts.forEach(b=>{
+    ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.ang);
+    ctx.globalAlpha = pulse; ctx.strokeStyle = FOIL.lime; ctx.lineWidth = 4; rrPath(ctx, -33, -24, 64, 46, 12); ctx.stroke();
+    ctx.restore();
+  });
+  ctx.globalAlpha = 1;
+  r.cars.slice().reverse().forEach(car=>racerDrawCar(ctx, car));
+  // HUD drawn in screen space
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  racerDrawMinimap(ctx, r);
+  let msg = '';
+  if(r.phase==='countdown') msg = r.countdown > 2.4 ? '3' : r.countdown > 1.4 ? '2' : r.countdown > 0.4 ? '1' : 'Go!';
+  else if(r.time < r.bannerUntil) msg = r.banner;
+  if(msg){
+    const big = r.phase==='countdown';
+    ctx.font = `800 ${big?44:22}px 'Baloo 2', sans-serif`;
+    const w = ctx.measureText(msg).width + (big?48:32), h = big?64:40;
+    stickerRect(ctx, RACER_VIEW/2 - w/2, RACER_VIEW*0.22 - h/2, w, h, h/2, big ? holoGradient(ctx, RACER_VIEW/2-w/2, 0, RACER_VIEW/2+w/2, 0) : FOIL.white, 3);
+    ctx.fillStyle = FOIL.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(msg, RACER_VIEW/2, RACER_VIEW*0.22 + 2);
+  }
+  // Driver's face sits on the player's car
+  const face = document.getElementById('racer-face');
+  if(face){
+    const sx = (player.x - camX + half)*RACER_ZOOM, sy = (player.y - camY + half)*RACER_ZOOM;
+    face.style.left = (sx/RACER_VIEW*100)+'%'; face.style.top = (sy/RACER_VIEW*100)+'%';
+  }
+}
+function racerDrawMinimap(ctx, r){
+  const track = r.track, mw = 116, mh = Math.round(mw*track.worldH/track.worldW), mx = RACER_VIEW - mw - 12, my = 12;
+  stickerRect(ctx, mx, my, mw, mh, 10, FOIL.white, 2);
+  const s = Math.min((mw-16)/track.worldW, (mh-16)/track.worldH);
+  const ox = mx + 8, oy = my + 8;
+  ctx.beginPath();
+  track.pts.forEach((p,i)=>{ const x = ox + p.x*s, y = oy + p.y*s; if(i) ctx.lineTo(x,y); else ctx.moveTo(x,y); });
+  ctx.closePath(); ctx.strokeStyle = FOIL.ink; ctx.lineWidth = 4; ctx.lineJoin = 'round'; ctx.stroke();
+  r.cars.slice().reverse().forEach(car=>{
+    ctx.fillStyle = car.colour; ctx.beginPath(); ctx.arc(ox + car.x*s, oy + car.y*s, car.isPlayer?5:4, 0, Math.PI*2); ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = FOIL.ink; ctx.stroke();
+  });
+}
+function racerLoopStep(dt){
+  const r = state.racer;
+  if(state.view!=='arcade-racer' || !r) return false;
+  racerStep(r, dt);
+  racerDraw(r);
+  const player = r.cars[0];
+  const pos = racerPositions(r).indexOf(player) + 1;
+  setTextIfChanged('racer-lap', `${Math.min(RACER_LAPS, Math.max(1, player.laps+1))}/${RACER_LAPS}`);
+  setTextIfChanged('racer-pos', ordinal(pos));
+  if(r.needsRender){ r.needsRender = false; render(); }
+  return r.phase!=='finished';
+}
+// ---- Racer spelling questions ----
+let racerRevealTimer = null;
+function clearRacerRevealTimer(){ if(racerRevealTimer){ clearTimeout(racerRevealTimer); racerRevealTimer = null; } }
+function racerNextItem(r){
+  if(r.poolIdx >= r.pool.length){ r.pool = shuffle(r.pool); r.poolIdx = 0; }
+  return r.pool[r.poolIdx++];
+}
+function racerOpenPrompt(r){
+  const item = racerNextItem(r);
+  r.questions++;
+  r.prompt = { item, input:'', checked:false, lastCorrect:false, accentMissing:false, wordRevealed:false, wordHidden:false, started:false };
+  r.steerTouch = 0;
+  pauseArcadeCountdown();
+  r.needsRender = true;
+}
+function racerResume(){
+  const r = state.racer;
+  if(!r || !r.prompt) return;
+  clearRacerRevealTimer();
+  if('speechSynthesis' in window) window.speechSynthesis.cancel();
+  r.prompt = null; r.sincePrompt = 0;
+  render();
+}
+function racerCheck(){
+  const r = state.racer;
+  if(!r || !r.prompt || r.prompt.checked) return;
+  const q = r.prompt, info = modeInfo(q.item.mode);
+  const result = gradeSpelling(q.input, q.item.word[info.gradeField]);
+  q.checked = true; q.lastCorrect = result.correct; q.accentMissing = result.accentMissing;
+  clearRacerRevealTimer();
+  if(result.correct){
+    const player = r.cars[0];
+    player.turboT = 2.6; player.turboMul = 1.55; player.speed = Math.max(player.speed, RACER_MAX_SPEED*1.3);
+    r.boostsEarned++;
+    r.banner = 'Spelling turbo! \uD83D\uDE80'; r.bannerUntil = r.time + 2;
+  }
+  render();
+  // A clean correct answer gets straight back to racing; a near miss or wrong answer waits
+  // for "Keep racing" so there's time to read the correct spelling.
+  if(result.correct && !result.accentMissing){
+    const thisPrompt = q;
+    setTimeout(()=>{ if(state.racer===r && r.prompt===thisPrompt) racerResume(); }, 1300);
+  }
+}
+function racerPromptHtml(r){
+  const q = r.prompt, info = modeInfo(q.item.mode), word = q.item.word;
+  const shownWord = word[info.shownField] || '';
+  const shownLang = info.shownField==='spanish' ? 'es-ES' : 'en-GB';
+  const speakFirst = q.item.mode==='copy' ? { text: word.english, lang:'en-GB' } : null;
+  const wordVisible = !info.revealTimer || (q.wordRevealed && !q.wordHidden);
+  return `<div class="racer-prompt">
+    <div class="card racer-prompt-card">
+      <p class="muted" style="text-align:center;margin:0;">Pit stop! Spell it right for a turbo boost</p>
+      <div class="word-row">
+        <div class="practice-word${wordVisible ? '' : ' word-faded'}" id="racer-shown-word" style="margin-top:0.4rem;">${wordVisible ? escapeHtml(shownWord) : ''}</div>
+        ${speakBtn(shownWord, shownLang, speakFirst)}
+      </div>
+      ${info.showTranslation && word.english ? `<div class="practice-translation" style="margin-bottom:0.8rem;">${escapeHtml(word.english)}</div>` : ''}
+      <input type="text" id="racer-answer" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${info.placeholder}" ${q.checked?'disabled':''} value="${escapeHtml(q.input)}">
+      ${q.checked ? feedbackHtml({ mode:q.item.mode, lastCorrect:q.lastCorrect, accentMissing:q.accentMissing }, word) : ''}
+      ${q.checked
+        ? `<button class="btn-primary btn-block" id="racer-continue" style="margin-top:0.8rem;">Keep racing</button>`
+        : `<button class="btn-primary btn-block" id="racer-check">Check</button>`}
+    </div>
+  </div>`;
+}
+function racerWirePrompt(r){
+  const q = r.prompt, info = modeInfo(q.item.mode), word = q.item.word;
+  const input = document.getElementById('racer-answer');
+  if(input){
+    if(!q.checked) input.focus();
+    input.oninput = (e)=>{ q.input = e.target.value; };
+    input.onkeydown = (e)=>{ if(e.key==='Enter'){ e.preventDefault(); if(q.checked) racerResume(); else racerCheck(); } };
+  }
+  const checkBtn = document.getElementById('racer-check'); if(checkBtn) checkBtn.onclick = racerCheck;
+  const contBtn = document.getElementById('racer-continue');
+  if(contBtn){ contBtn.onclick = racerResume; if(!input || input.disabled) contBtn.focus(); }
+  // Same listen-then-reveal-then-fade sequence as the practice screen's copy modes.
+  if(!q.started && !q.checked){
+    q.started = true;
+    const shownWord = word[info.shownField] || '';
+    const listMeta = state.lists.find(l=>l.id===q.item.listId);
+    const visibleMs = (listMeta && listMeta.mastered) ? 3000 : 4000;
+    speakSequence(info.audio(word)).then(()=>{
+      if(!info.revealTimer || state.racer!==r || r.prompt!==q || q.checked) return;
+      q.wordRevealed = true;
+      const el = document.getElementById('racer-shown-word');
+      if(el){ el.textContent = shownWord; el.classList.remove('word-faded'); }
+      racerRevealTimer = setTimeout(()=>{
+        racerRevealTimer = null;
+        const el2 = document.getElementById('racer-shown-word');
+        if(el2) el2.classList.add('word-faded');
+        setTimeout(()=>{
+          if(state.racer===r && r.prompt===q && !q.checked){
+            q.wordHidden = true;
+            const el3 = document.getElementById('racer-shown-word');
+            if(el3) el3.textContent = '';
+          }
+        }, 450);
+      }, visibleMs);
+    });
+  }
+}
+// ---- Racer setup (list picker) and race screen ----
+function renderRacerSetup(){
+  const lists = state.lists;
+  const valid = new Set(lists.map(l=>l.id));
+  game.racerListIds = (game.racerListIds||[]).filter(id=>valid.has(id));
+  const selected = new Set(game.racerListIds);
+  const hasTime = (game.arcadeMs||0) > 0;
+  const hasSpanish = lists.some(l=>(l.lang||'es')==='es');
+  const listRows = lists.map(l=>`
+    <label class="list-chip racer-list-row${selected.has(l.id)?' selected':''}" for="rl-${l.id}">
+      <span style="display:flex;align-items:center;gap:0.7rem;">
+        <input type="checkbox" class="racer-list-check" id="rl-${l.id}" data-id="${l.id}" ${selected.has(l.id)?'checked':''}>
+        <span><strong>${escapeHtml(l.label)}</strong><br><span class="meta">${(l.lang||'es')==='en'?'English':'Spanish'}, ${l.count} word${l.count===1?'':'s'}</span></span>
+      </span>
+    </label>`).join('');
+  const canStart = hasTime && selected.size>0;
+  app.innerHTML = `
+    <button class="btn-ghost" id="btn-back-arcade">\u2190 Back to Arcade</button>
+    <h2 class="section-title">Overhead Racer</h2>
+    <p class="muted">Three laps against two computer cars. Every 10 seconds there's a pit stop spelling, get it right for a turbo boost.</p>
+    ${state.error ? `<div class="error-box">${escapeHtml(state.error)}</div>` : ''}
+    <div class="card">
+      <h3 style="margin-top:0;">Which words?</h3>
+      ${lists.length ? `<p class="muted" style="margin-top:0;">Pick one list or several, English and Spanish can be mixed.</p>${listRows}` : `<p class="muted" style="margin:0;">No word lists saved yet. Add a list from Home first, then come back to race.</p>`}
+    </div>
+    ${hasSpanish ? `<div class="card">
+      <label class="muted" style="display:block;margin-bottom:0.2rem;" for="racer-es-mode">Spanish words</label>
+      <select id="racer-es-mode" style="margin-bottom:0;">
+        <option value="copy" ${game.racerSpanishMode!=='translate'?'selected':''}>Copy the Spanish (word shown)</option>
+        <option value="translate" ${game.racerSpanishMode==='translate'?'selected':''}>Translate from English</option>
+      </select>
+    </div>` : ''}
+    <div class="card">
+      <label class="muted" style="display:block;margin-bottom:0.2rem;" for="racer-difficulty">Computer cars</label>
+      <select id="racer-difficulty" style="margin-bottom:0;">
+        <option value="gentle" ${game.racerDifficulty!=='speedy'?'selected':''}>Gentle, with steering help</option>
+        <option value="speedy" ${game.racerDifficulty==='speedy'?'selected':''}>Speedy, less steering help</option>
+      </select>
+    </div>
+    <button class="btn-primary btn-block" id="btn-racer-start" ${canStart?'':'disabled'}>${selected.size ? 'Start race' : 'Pick a list to start'}</button>
+    ${!hasTime ? `<p class="muted" style="text-align:center;">No arcade time left, score 90%+ three times on a list to earn more!</p>` : ''}
+  `;
+  document.getElementById('btn-back-arcade').onclick = ()=>{ state.error=''; state.view='arcade'; render(); };
+  document.querySelectorAll('.racer-list-check').forEach(cb=>{
+    cb.onchange = ()=>{
+      const ids = new Set(game.racerListIds||[]);
+      if(cb.checked) ids.add(cb.dataset.id); else ids.delete(cb.dataset.id);
+      game.racerListIds = Array.from(ids);
+      const esSel = document.getElementById('racer-es-mode'); if(esSel) game.racerSpanishMode = esSel.value;
+      game.racerDifficulty = document.getElementById('racer-difficulty').value;
+      render();
+    };
+  });
+  const startBtn = document.getElementById('btn-racer-start');
+  startBtn.onclick = async ()=>{
+    if((game.arcadeMs||0)<=0 || !(game.racerListIds||[]).length) return;
+    unlockSpeech(); // must run synchronously inside the tap, before any await, so questions can speak
+    const esSel = document.getElementById('racer-es-mode');
+    game.racerSpanishMode = esSel ? esSel.value : (game.racerSpanishMode||'copy');
+    game.racerDifficulty = document.getElementById('racer-difficulty').value;
+    startBtn.disabled = true; startBtn.textContent = 'Loading words\u2026';
+    const pool = [];
+    for(const listId of game.racerListIds){
+      const meta = state.lists.find(l=>l.id===listId);
+      if(!meta) continue;
+      const words = await getListWords(listId);
+      const lang = meta.lang || 'es';
+      words.forEach(w=>{
+        const english = (w.english||'').trim(), spanish = (w.spanish||'').trim();
+        if(lang==='en'){ if(english) pool.push({ mode:'copy-en', listId, word:{ english, spanish:'' } }); }
+        else if(game.racerSpanishMode==='translate'){ if(english && spanish) pool.push({ mode:'translate', listId, word:{ english, spanish } }); }
+        else if(spanish) pool.push({ mode:'copy', listId, word:{ english, spanish } });
+      });
+    }
+    if(!pool.length){ state.error = "Those lists don't have any words to spell yet."; render(); return; }
+    state.error = '';
+    await saveGame();
+    state.racer = newRacer(pool, game.racerDifficulty);
+    state.view = 'arcade-racer'; render();
+  };
+}
+function renderRacer(){
+  const r = state.racer;
+  if(!r){ state.view = 'arcade-racer-setup'; render(); return; }
+  const charId = game.selectedRacerSevling;
+  const charSevling = charId ? SEVLINGS.find(x=>x.id===charId) : null;
+  const hasTime = (game.arcadeMs||0) > 0;
+  const finished = r.phase==='finished';
+  const player = r.cars[0];
+  const placeLine = finished ? ({1:'You won the race! \uD83C\uDFC6', 2:'You came 2nd! \uD83E\uDD48', 3:'You came 3rd, well raced! \uD83E\uDD49'})[r.place] : '';
+  app.innerHTML = `
+    <button class="btn-ghost" id="btn-back-arcade">\u2190 Back to Arcade</button>
+    <h2 class="section-title">Overhead Racer</h2>
+    <p class="progress" style="text-align:center;">Lap <span id="racer-lap">${Math.min(RACER_LAPS, Math.max(1, player.laps+1))}/${RACER_LAPS}</span> &nbsp;\u00B7&nbsp; <span id="racer-pos">${ordinal(racerPositions(r).indexOf(player)+1)}</span> &nbsp;\u00B7&nbsp; Arcade time left: <span id="arcade-timer">${formatMs(game.arcadeMs||0)}</span>${r.prompt ? ' (paused)' : ''}</p>
+    ${r.wonItemName ? `<div class="card reward-card" style="border-top-color:var(--gold);"><p class="muted" style="text-align:center;margin:0;">\uD83C\uDF81 You won ${escapeHtml(r.wonItemName)} for ${escapeHtml(charSevling?charSevling.name:'your Sevling')}! Happiness +15</p></div>` : ''}
+    ${finished ? `<div class="card" style="text-align:center;"><div class="reward-name">${placeLine}</div><p class="muted" style="margin:0.3rem 0 0;">Spelling turbos: ${r.boostsEarned} of ${r.questions}</p></div>` : ''}
+    ${(!hasTime) ? `<div class="card"><p class="muted" style="text-align:center;font-size:0.85rem;margin:0;">${finished ? 'Out of arcade time, score 90%+ three times on a list to earn more!' : 'Your arcade time has run out, but you can finish this race.'}</p></div>` : ''}
+    <div class="card game-card">
+      <div class="game-stage" style="aspect-ratio:1/1;">
+        <canvas id="racer-canvas" class="game-canvas" aria-label="Race track, hold the left or right side to steer"></canvas>
+        ${charSevling ? `<div id="racer-face" class="game-face" style="width:${(18/RACER_VIEW*100).toFixed(2)}%;">${sevlingIcon(charSevling,false,true)}</div>` : ''}
+        ${r.prompt ? racerPromptHtml(r) : ''}
+      </div>
+    </div>
+    ${(finished || r.prompt) ? '' : `<div class="racer-steer">
+      <button class="btn-secondary" id="racer-left" aria-label="Steer left">\u2190</button>
+      <button class="btn-secondary" id="racer-right" aria-label="Steer right">\u2192</button>
+    </div>
+    <p class="muted" style="text-align:center;margin:0.4rem 0 0;">Your car drives itself forward, hold left or right to steer. Gold pads boost you, oil makes you spin.</p>`}
+    <div class="btn-row" style="margin-top:1rem;justify-content:center;">
+      <button class="btn-secondary" id="btn-racer-again" ${hasTime?'':'disabled'}>${finished ? 'Race again' : 'Restart race'}</button>
+      <button class="btn-secondary" id="btn-racer-lists">Change lists</button>
+    </div>
+  `;
+  const leave = ()=>{ stopAllArcadeIntervals(); if('speechSynthesis' in window) window.speechSynthesis.cancel(); };
+  document.getElementById('btn-back-arcade').onclick = ()=>{ leave(); state.view='arcade'; render(); };
+  document.getElementById('btn-racer-lists').onclick = ()=>{ leave(); state.view='arcade-racer-setup'; render(); };
+  document.getElementById('btn-racer-again').onclick = ()=>{
+    if((game.arcadeMs||0)<=0) return;
+    unlockSpeech();
+    leave();
+    state.racer = newRacer(r.pool, r.difficulty); render();
+  };
+  // Steering: big hold buttons, or hold either half of the track itself.
+  const setSteer = (v)=>{ if(state.racer) state.racer.steerTouch = v; };
+  const holdBtn = (id, v)=>{
+    const b = document.getElementById(id); if(!b) return;
+    b.onpointerdown = (e)=>{ e.preventDefault(); try{ b.setPointerCapture(e.pointerId); }catch(_){} setSteer(v); };
+    b.onpointerup = b.onpointercancel = b.onlostpointercapture = ()=>setSteer(0);
+    b.oncontextmenu = (e)=>e.preventDefault();
+  };
+  holdBtn('racer-left', -1); holdBtn('racer-right', 1);
+  const canvas = document.getElementById('racer-canvas');
+  const zoneSteer = (e)=>{ const rect = canvas.getBoundingClientRect(); setSteer((e.clientX - rect.left) < rect.width/2 ? -1 : 1); };
+  canvas.onpointerdown = (e)=>{ e.preventDefault(); try{ canvas.setPointerCapture(e.pointerId); }catch(_){} zoneSteer(e); };
+  canvas.onpointermove = (e)=>{ if(e.buttons) zoneSteer(e); };
+  canvas.onpointerup = canvas.onpointercancel = canvas.onlostpointercapture = ()=>setSteer(0);
+  canvas.oncontextmenu = (e)=>e.preventDefault();
+  r.steerTouch = 0;
+  if(r.prompt) racerWirePrompt(r);
+  racerDraw(r);
+  if(!finished){
+    startArcadeRaf(racerLoopStep);
+    if(hasTime && !r.prompt) startArcadeCountdown(()=>render());
+  }else{
+    stopAllArcadeIntervals();
+  }
 }
 
 // ---- Word Search ----
