@@ -258,6 +258,15 @@ function wireSevlingAnimations(){
     if(s) startSevlingAnimation(img, s);
   });
 }
+// A small mood emoji alongside each unlocked Sevling's icon, reflecting its current happiness.
+// The 60% split matches the happy/normal idle-animation threshold above.
+function sevlingMoodEmoji(happiness){
+  const h = happiness||0;
+  if(h>=90) return '\u{1F929}'; // star-struck, thrilled
+  if(h>=60) return '\u{1F60A}'; // smiling, happy
+  if(h>=20) return '\u{1F610}'; // neutral face
+  return '\u{1F622}'; // crying, needs feeding
+}
 const FOOD_ITEMS = [
   { id:'carrot', name:'Carrot', emoji:'\u{1F955}', price:1, happiness:8 },
   { id:'apple', name:'Apple', emoji:'\u{1F34E}', price:1, happiness:8 },
@@ -282,7 +291,7 @@ const state = {
   practice: { mode:null, words:[], index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:false, reward:null, trophyVariant:null, newSevling:null }
 };
 
-function emptyGameState(){ return { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, listStreaks:{}, streakGoal:4, lastSevlingAt:null, cooldownDays:14, arcadeMs:0, gameUnlockStreaks:{}, selectedSnakeSevling:null, selectedConnect4Sevling:null, selectedMazeSevling:null, selectedMazeEscapeSevling:null }; }
+function emptyGameState(){ return { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, listStreaks:{}, streakGoal:4, lastSevlingAt:null, cooldownDays:14, fullMarksSinceLastWin:0, arcadeMs:0, gameUnlockStreaks:{}, selectedSnakeSevling:null, selectedConnect4Sevling:null, selectedMazeSevling:null, selectedMazeEscapeSevling:null }; }
 let game = emptyGameState();
 let settings = { firebaseConfig:null };
 let fbApp = null, db = null, auth = null, authUser = null;
@@ -1388,8 +1397,13 @@ function randInt(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
 async function checkSevlingUnlock(p){
   if(!p.listId) return;
   if(!game.listStreaks) game.listStreaks = {};
-  if(p.wrong.length===0) game.listStreaks[p.listId] = (game.listStreaks[p.listId]||0) + 1;
-  const cooldownMs = (game.cooldownDays||14) * 24*60*60*1000;
+  if(p.wrong.length===0){
+    game.listStreaks[p.listId] = (game.listStreaks[p.listId]||0) + 1;
+    // Every perfect practice, on any list, chips a day off the cooldown wait below (floor 7 days/1 week).
+    game.fullMarksSinceLastWin = (game.fullMarksSinceLastWin||0) + 1;
+  }
+  const effectiveCooldownDays = Math.max(7, (game.cooldownDays||14) - (game.fullMarksSinceLastWin||0));
+  const cooldownMs = effectiveCooldownDays * 24*60*60*1000;
   const cooldownReady = !game.lastSevlingAt || (Date.now() - game.lastSevlingAt) >= cooldownMs;
   const streakReady = (game.listStreaks[p.listId]||0) >= (game.streakGoal||4);
   if(streakReady && cooldownReady){
@@ -1402,6 +1416,7 @@ async function checkSevlingUnlock(p){
       game.streakGoal = randInt(4,5);
       game.lastSevlingAt = Date.now();
       game.cooldownDays = randInt(14,21);
+      game.fullMarksSinceLastWin = 0;
       p.newSevling = won;
     }
   }
@@ -1410,7 +1425,8 @@ function collectionLabel(id){ return ({ farm:'Farm', jungle:'Jungle', sea:'Sea',
 function sevlingsProgressLine(listId, listLabel){
   const streaks = game.listStreaks || {};
   const remaining = Math.max(0, (game.streakGoal||4) - (streaks[listId]||0));
-  const cooldownMs = (game.cooldownDays||14) * 24*60*60*1000;
+  const effectiveCooldownDays = Math.max(7, (game.cooldownDays||14) - (game.fullMarksSinceLastWin||0));
+  const cooldownMs = effectiveCooldownDays * 24*60*60*1000;
   const daysLeft = game.lastSevlingAt ? Math.max(0, Math.ceil((cooldownMs - (Date.now()-game.lastSevlingAt)) / 86400000)) : 0;
   const label = listLabel ? `"${listLabel}"` : 'this list';
   if(remaining<=0 && daysLeft<=0) return `Get every word right on your next practice with ${label} to win a new Sevling!`;
@@ -1504,8 +1520,10 @@ function sevlingTile(s){
     ? care.accessories.map(id=>{ const a=ACCESSORY_ITEMS.find(x=>x.id===id); return a?a.emoji:''; }).join('')
     : '';
   const icon = sevlingIcon(s, !unlocked);
+  const mood = unlocked && care ? `<div class="sevling-mood" title="Mood" style="font-size:1.25rem;line-height:1;margin-top:0.15rem;">${sevlingMoodEmoji(care.happiness)}</div>` : '';
   return `<div class="shop-item ${unlocked?'':'locked'}" ${unlocked?`data-sevling="${s.id}"`:''}>
     <div class="item-emoji sevling-icon">${icon}</div>
+    ${mood}
     ${worn ? `<div class="sevling-worn-badges">${worn}</div>` : ''}
     <div class="item-name">${unlocked ? escapeHtml(s.name) : '???'}</div>
   </div>`;
@@ -1546,7 +1564,7 @@ function renderSevlings(){
   app.innerHTML = `
     ${navRow('sevlings')}
     <h2 class="section-title">Sevlings</h2>
-    <p class="muted">You've found ${unlockedCount} of ${SEVLINGS.length} Sevlings. Win a new one for every ${game.streakGoal||4} fully correct practices in a row with the *same* word list, roughly every few weeks. Progress is per list, so switching between lists doesn't add up, sticking with one list is what gets you there.</p>
+    <p class="muted">You've found ${unlockedCount} of ${SEVLINGS.length} Sevlings. Win a new one for every ${game.streakGoal||4} fully correct practices in a row with the *same* word list, plus a short wait. Progress is per list, so switching between lists doesn't add up, sticking with one list is what gets you there. The more full-mark practices you do (any list), the faster that wait counts down, right down to a week.</p>
     ${inProgress.length ? inProgress.map(l=>`<div class="card"><p class="muted" style="text-align:center;margin:0;"><strong>${escapeHtml(l.label)}</strong> (${l.lang==='en'?'English':'Spanish'}): ${sevlingsProgressLine(l.id, l.label)}</p></div>`).join('')
       : `<div class="card"><p class="muted" style="text-align:center;margin:0;">Pick a list and practise it a few times in a row, fully correct, to start winning Sevlings!</p></div>`}
     ${COLLECTIONS.map(([id,label])=>`
@@ -1578,7 +1596,7 @@ function renderSevlingCare(){
       ${wornEmoji ? `<div class="sevling-worn-badges" style="margin-top:0.4rem;">${wornEmoji}</div>` : ''}
       <h2 class="section-title" style="text-align:center;">${escapeHtml(s.name)}</h2>
       <p class="muted" style="margin-top:-0.3rem;">${collectionLabel(s.collection)} collection</p>
-      <p class="progress" style="text-align:center;">Happiness: ${care.happiness}%</p>
+      <p class="progress" style="text-align:center;">Happiness: ${care.happiness}% ${sevlingMoodEmoji(care.happiness)}</p>
     </div>
     <h3 class="section-title">Feed ${escapeHtml(s.name)}</h3>
     <div class="shop-grid">${FOOD_ITEMS.map(foodTile).join('')}</div>
