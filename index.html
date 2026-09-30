@@ -10,6 +10,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#221A3D">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -156,6 +159,9 @@
   .racer-steer button{ font-size:2rem; padding:1.2rem 0; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
   .racer-list-row{ cursor:pointer; }
   .racer-list-row input[type=checkbox]{ width:22px; height:22px; margin:0; accent-color:var(--pink); flex-shrink:0; }
+  #update-banner{ position:fixed; left:50%; bottom:calc(1rem + env(safe-area-inset-bottom, 0px)); transform:translateX(-50%); z-index:60; width:calc(100% - 2rem); max-width:480px; display:none; align-items:center; justify-content:space-between; gap:0.8rem; background:var(--gold); color:var(--ink); border:2px solid var(--ink); border-radius:16px; box-shadow:var(--shadow-ink); padding:0.7rem 0.8rem 0.7rem 1.1rem; font-weight:700; font-size:0.95rem; }
+  #update-banner.show{ display:flex; }
+  #update-banner button{ padding:0.55rem 0.9rem; min-height:auto; background:var(--surface); flex-shrink:0; }
   @media (prefers-reduced-motion: reduce){ .spinner{animation:none;} .blob{animation:none;top:20px;} }
 </style>
 </head>
@@ -163,6 +169,7 @@
 <div id="logo-badge"><img src="logo-mark.png" alt="SevSpell"></div>
 <div id="balance-badge"></div>
 <div id="app" class="page"></div>
+<div id="update-banner" role="status"><span>A new version of SevSpell is ready</span><button type="button" id="btn-update-now">Update now</button></div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
@@ -170,6 +177,56 @@ import { getFirestore, doc, getDoc, setDoc, deleteDoc } from "https://www.gstati
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, onAuthStateChanged, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 
 const app = document.getElementById('app');
+
+// ---------- Version and update check ----------
+// BUMP APP_VERSION WITH EVERY CHANGE TO THIS FILE. The app fetches a fresh copy of itself from
+// GitHub (bypassing every cache), reads the APP_VERSION inside it, and if it differs from the
+// one running, offers (or, on the sign-in/profile screens, just does) a reload. This matters most
+// for the iOS home-screen version, which otherwise keeps running an old cached copy.
+const APP_VERSION = '2026-09-30.4';
+let latestSeenVersion = null, lastUpdateCheckAt = 0;
+function freshUrl(){ return location.origin + location.pathname + '?v=' + Date.now(); }
+async function fetchLatestVersion(){
+  if(location.protocol==='file:') return null;
+  const resp = await fetch(freshUrl(), { cache:'no-store' });
+  if(!resp.ok) throw new Error('HTTP ' + resp.status);
+  const text = await resp.text();
+  const m = text.match(/const APP_VERSION = '([0-9A-Za-z.\-]+)'/);
+  return m ? m[1] : null;
+}
+function reloadToLatest(){
+  try{ sessionStorage.setItem('sevspell_update_tried', latestSeenVersion || 'manual'); }catch(e){}
+  // A brand new URL (unique ?v=) sidesteps the cached copy iOS is holding on to.
+  location.replace(freshUrl());
+}
+function showUpdateBanner(){
+  const el = document.getElementById('update-banner');
+  if(!el) return;
+  el.classList.add('show');
+  document.getElementById('btn-update-now').onclick = reloadToLatest;
+}
+async function checkForUpdate(opts){
+  const manual = opts && opts.manual;
+  if(!manual && Date.now() - lastUpdateCheckAt < 2*60*1000) return 'skipped';
+  lastUpdateCheckAt = Date.now();
+  let latest;
+  try{ latest = await fetchLatestVersion(); }catch(e){ return 'error'; }
+  if(!latest) return 'error';
+  latestSeenVersion = latest;
+  if(latest===APP_VERSION){ try{ sessionStorage.removeItem('sevspell_update_tried'); }catch(e){} return 'current'; }
+  if(manual) return 'newer';
+  // Only reload by itself where nothing can be lost, and never twice in a row for the same version
+  // (GitHub can take a few minutes to publish a push, so the "new" copy may briefly still be the old one).
+  let alreadyTried = false;
+  try{ alreadyTried = sessionStorage.getItem('sevspell_update_tried')===latest; }catch(e){}
+  if(!alreadyTried && (state.view==='login' || state.view==='profiles')) reloadToLatest();
+  else showUpdateBanner();
+  return 'newer';
+}
+// Check on launch, and again whenever the home-screen app is brought back to the front
+// (iOS often resumes a suspended copy rather than loading the page again).
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') checkForUpdate(); });
+window.addEventListener('pageshow', (e)=>{ if(e.persisted) checkForUpdate(); });
 
 const SEVLING_BODY = 'M60,15 C85,15 100,40 100,65 C100,95 82,110 60,110 C38,110 20,95 20,65 C20,40 35,15 60,15 Z';
 const SEVLINGS = [
@@ -303,7 +360,7 @@ const state = {
   practice: { mode:null, words:[], index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:false, reward:null, trophyVariant:null, newSevling:null }
 };
 
-function emptyGameState(){ return { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, listStreaks:{}, streakGoal:4, lastSevlingAt:null, cooldownDays:14, fullMarksSinceLastWin:0, arcadeMs:0, gameUnlockStreaks:{}, selectedSnakeSevling:null, selectedConnect4Sevling:null, selectedMazeSevling:null, selectedBrickSevling:null, selectedRacerSevling:null, racerListIds:[], racerSpanishMode:'copy', racerDifficulty:'gentle' }; }
+function emptyGameState(){ return { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, listStreaks:{}, streakGoal:4, lastSevlingAt:null, cooldownDays:14, fullMarksSinceLastWin:0, arcadeMs:0, gameUnlockStreaks:{}, selectedSnakeSevling:null, selectedConnect4Sevling:null, selectedMazeSevling:null, selectedBrickSevling:null, selectedRacerSevling:null, racerListIds:[], racerSpanishMode:'copy', racerDifficulty:'speedy' }; }
 let game = emptyGameState();
 let settings = { firebaseConfig:null };
 let fbApp = null, db = null, auth = null, authUser = null;
@@ -691,6 +748,7 @@ async function init(){
     state.view = 'settings';
   }
   render();
+  checkForUpdate();
 }
 
 // ---------- shared UI ----------
@@ -1457,7 +1515,20 @@ function sevlingsProgressLine(listId, listLabel){
   const parts = [];
   if(remaining>0) parts.push(`${remaining} more perfect test${remaining===1?'':'s'} with ${label}`);
   if(daysLeft>0) parts.push(`${daysLeft} more day${daysLeft===1?'':'s'}`);
-  return `${parts.join(' and ')} until your next Sevling.`;
+  let line = `${parts.join(' and ')} until your next Sevling.`;
+  // The day count already includes the perfect-score speed-up, spell that out so it's clear
+  // perfect scores are what shorten it, and how short it can get (the 7-day floor).
+  if(daysLeft>0){
+    const elapsedMs = Date.now() - game.lastSevlingAt;
+    const floorDaysLeft = Math.max(0, Math.ceil((7*86400000 - elapsedMs) / 86400000));
+    if(effectiveCooldownDays > 7){
+      const shortest = floorDaysLeft===0 ? 'enough of them could make it ready straight away' : `it can come down to just ${floorDaysLeft} day${floorDaysLeft===1?'':'s'}`;
+      line += ` Every perfect score, on any list, takes a day off the wait, ${shortest}.`;
+    }else{
+      line += ' Perfect scores have already brought the wait down to the shortest it can be.';
+    }
+  }
+  return line;
 }
 function sevlingProgressHtml(p){
   if(p.newSevling){
@@ -2563,6 +2634,7 @@ const RACER_BARRIER = 30;         // soft cushion beyond the track edge before t
 const RACER_LAPS = 3;
 const RACER_MAX_SPEED = 260;
 const RACER_PROMPT_EVERY = 10;    // seconds of racing between spelling questions
+const RACER_FLASH_MS = 1000;      // how long a pit-stop word stays visible before fading
 const RACER_SPACING = 12;         // world units between centreline samples
 const RACER_CONTROL_POINTS = [[300,250],[750,180],[1150,280],[1480,260],[1640,520],[1480,780],[1140,790],[980,960],[1160,1150],[1500,1200],[1580,1420],[1250,1540],[800,1500],[540,1320],[640,1040],[440,840],[230,740],[190,470]];
 const RACER_DIFFICULTY = {
@@ -2687,7 +2759,7 @@ function newRacerCar(track, lane, colour, isPlayer, name){
 function newRacer(pool, difficulty){
   const track = racerBuildTrack();
   return {
-    track, difficulty: RACER_DIFFICULTY[difficulty] ? difficulty : 'gentle',
+    track, difficulty: RACER_DIFFICULTY[difficulty] ? difficulty : 'speedy',
     cars: [ newRacerCar(track, -36, FOIL.pink, true, 'You'), newRacerCar(track, 0, FOIL.blue, false, 'Blue'), newRacerCar(track, 36, FOIL.gold, false, 'Gold') ],
     phase:'countdown', countdown:3.4, time:0, sincePrompt:0, pool: shuffle(pool), poolIdx:0,
     prompt:null, finishCount:0, place:0, boostsEarned:0, questions:0, steerTouch:0,
@@ -2993,12 +3065,12 @@ function racerWirePrompt(r){
   const checkBtn = document.getElementById('racer-check'); if(checkBtn) checkBtn.onclick = racerCheck;
   const contBtn = document.getElementById('racer-continue');
   if(contBtn){ contBtn.onclick = racerResume; if(!input || input.disabled) contBtn.focus(); }
-  // Same listen-then-reveal-then-fade sequence as the practice screen's copy modes.
+  // Same listen-then-reveal-then-fade sequence as the practice screen's copy modes, but the
+  // word only flashes up for 1 second here (practice mode shows it for 4s, or 3s once mastered).
   if(!q.started && !q.checked){
     q.started = true;
     const shownWord = word[info.shownField] || '';
-    const listMeta = state.lists.find(l=>l.id===q.item.listId);
-    const visibleMs = (listMeta && listMeta.mastered) ? 3000 : 4000;
+    const visibleMs = RACER_FLASH_MS;
     speakSequence(info.audio(word)).then(()=>{
       if(!info.revealTimer || state.racer!==r || r.prompt!==q || q.checked) return;
       q.wordRevealed = true;
@@ -3054,8 +3126,8 @@ function renderRacerSetup(){
     <div class="card">
       <label class="muted" style="display:block;margin-bottom:0.2rem;" for="racer-difficulty">Computer cars</label>
       <select id="racer-difficulty" style="margin-bottom:0;">
-        <option value="gentle" ${game.racerDifficulty!=='speedy'?'selected':''}>Gentle, with steering help</option>
-        <option value="speedy" ${game.racerDifficulty==='speedy'?'selected':''}>Speedy, less steering help</option>
+        <option value="speedy" ${game.racerDifficulty!=='gentle'?'selected':''}>Speedy, real steering needed to win</option>
+        <option value="gentle" ${game.racerDifficulty==='gentle'?'selected':''}>Gentle, with steering help</option>
       </select>
     </div>
     <button class="btn-primary btn-block" id="btn-racer-start" ${canStart?'':'disabled'}>${selected.size ? 'Start race' : 'Pick a list to start'}</button>
@@ -3349,11 +3421,29 @@ function renderSettings(){
       <p class="status-line">Status: ${connected ? '\uD83D\uDFE2 Connected' : '\u26AA Not connected yet'}</p>
     </div>
 
+    <div class="card">
+      <h3 style="margin-top:0;">App updates</h3>
+      <p class="muted">This device is running version <strong>${APP_VERSION}</strong>. The app checks for a newer version each time it opens, use this if it still looks out of date.</p>
+      ${state.updateMessage ? `<p class="status-line">${escapeHtml(state.updateMessage)}</p>` : ''}
+      <div class="btn-row">
+        <button class="btn-secondary" id="btn-check-update">Check for updates</button>
+        <button class="btn-secondary" id="btn-force-reload">Reload latest version</button>
+      </div>
+    </div>
+
     <div class="btn-row">
       <button class="btn-primary" id="btn-save-settings">Save settings</button>
     </div>
     ${authUser ? `<button class="btn-secondary btn-block" id="btn-settings-back" style="margin-top:0.6rem;">${state.currentProfileId ? '\u2190 Back to Home' : '\u2190 Back to profiles'}</button>` : ''}
   `;
+  document.getElementById('btn-check-update').onclick = async ()=>{
+    state.updateMessage = 'Checking\u2026'; render();
+    const result = await checkForUpdate({ manual:true });
+    if(result==='newer'){ state.updateMessage = `Version ${latestSeenVersion} is available, updating now\u2026`; render(); setTimeout(reloadToLatest, 600); return; }
+    state.updateMessage = result==='current' ? "You're on the latest version." : "Couldn't reach GitHub to check, try again when you're online.";
+    render();
+  };
+  document.getElementById('btn-force-reload').onclick = ()=>{ state.updateMessage = ''; reloadToLatest(); };
   const backBtn = document.getElementById('btn-settings-back');
   if(backBtn) backBtn.onclick = ()=>{ state.view = state.currentProfileId ? 'home' : 'profiles'; render(); };
   const addTimeBtn = document.getElementById('btn-add-arcade-time');
