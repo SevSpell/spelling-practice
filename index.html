@@ -162,7 +162,10 @@
   #update-banner{ position:fixed; left:50%; bottom:calc(1rem + env(safe-area-inset-bottom, 0px)); transform:translateX(-50%); z-index:60; width:calc(100% - 2rem); max-width:480px; display:none; align-items:center; justify-content:space-between; gap:0.8rem; background:var(--gold); color:var(--ink); border:2px solid var(--ink); border-radius:16px; box-shadow:var(--shadow-ink); padding:0.7rem 0.8rem 0.7rem 1.1rem; font-weight:700; font-size:0.95rem; }
   #update-banner.show{ display:flex; }
   #update-banner button{ padding:0.55rem 0.9rem; min-height:auto; background:var(--surface); flex-shrink:0; }
-  @media (prefers-reduced-motion: reduce){ .spinner{animation:none;} .blob{animation:none;top:20px;} }
+  .sevling-egg.wobble{ transform-origin:50% 92%; animation:egg-wobble 2.6s ease-in-out infinite; }
+  @keyframes egg-wobble{ 0%,68%,100%{transform:rotate(0);} 74%{transform:rotate(-7deg);} 80%{transform:rotate(6deg);} 86%{transform:rotate(-4deg);} 92%{transform:rotate(2deg);} }
+  .hatching-note{ display:inline-block; margin:0 auto 0.2rem; padding:0.1rem 0.55rem; font-size:0.72rem; font-weight:800; color:var(--ink); background:var(--holo); border:1.5px solid var(--ink); border-radius:999px; box-shadow:var(--shadow-ink-press); white-space:nowrap; }
+  @media (prefers-reduced-motion: reduce){ .sevling-egg.wobble{animation:none;} .spinner{animation:none;} .blob{animation:none;top:20px;} }
 </style>
 </head>
 <body>
@@ -183,7 +186,7 @@ const app = document.getElementById('app');
 // GitHub (bypassing every cache), reads the APP_VERSION inside it, and if it differs from the
 // one running, offers (or, on the sign-in/profile screens, just does) a reload. This matters most
 // for the iOS home-screen version, which otherwise keeps running an old cached copy.
-const APP_VERSION = '2026-09-30.4';
+const APP_VERSION = '2026-09-30.7';
 let latestSeenVersion = null, lastUpdateCheckAt = 0;
 function freshUrl(){ return location.origin + location.pathname + '?v=' + Date.now(); }
 async function fetchLatestVersion(){
@@ -225,7 +228,7 @@ async function checkForUpdate(opts){
 }
 // Check on launch, and again whenever the home-screen app is brought back to the front
 // (iOS often resumes a suspended copy rather than loading the page again).
-document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') checkForUpdate(); });
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible'){ checkForUpdate(); retrySevlingArtProbes(); } });
 window.addEventListener('pageshow', (e)=>{ if(e.persisted) checkForUpdate(); });
 
 const SEVLING_BODY = 'M60,15 C85,15 100,40 100,65 C100,95 82,110 60,110 C38,110 20,95 20,65 C20,40 35,15 60,15 Z';
@@ -272,7 +275,69 @@ function sevlingSvg(s, color, extraStyle){
   const body = s.noBody ? '' : `<path d="${SEVLING_BODY}"/>`;
   return `<svg viewBox="-50 -60 220 220" fill="${color}" style="width:100%;height:100%;display:block;${extraStyle||''}">${body}${s.features||''}</svg>`;
 }
+// ---------- "Hatching soon" egg for Sevlings without real artwork yet ----------
+// Any unlocked Sevling with no image shows a rainbow egg. The app quietly checks GitHub for
+// <id>.png (plus <id>-blink.png and <id>-happy.png for the idle animation); as soon as the files
+// are there, the egg is swapped for the real art automatically, no code change needed.
+let sevlingEggSeq = 0;
+function sevlingEggSvg(s, still){
+  const uidc = 'egg' + (++sevlingEggSeq);
+  const bands = ['#FF3EA5','#FF9A3D','#FFD447','#C4FF3D','#00C2FF','#9B7BFF'];
+  const zig = (y)=>{ let d = `M0,${y}`; for(let x=0;x<=100;x+=10) d += ` L${x},${y + ((x/10)%2 ? -5 : 5)}`; return d; };
+  const bandPaths = bands.map((col,i)=>{ const y = 4 + i*16; return `<path d="${zig(y)} L100,${y+40} L0,${y+40} Z" fill="${col}"/>`; }).join('');
+  const egg = 'M50,6 C73,6 88,40 88,62 C88,83 71,96 50,96 C29,96 12,83 12,62 C12,40 27,6 50,6 Z';
+  return `<svg viewBox="0 0 104 104" class="sevling-egg${still?'':' wobble'}" data-sevling-egg="${s.id}" role="img" aria-label="${escapeHtml(s.name)} is hatching soon" style="width:100%;height:100%;display:block;overflow:visible;">
+    <defs><clipPath id="${uidc}"><path d="${egg}"/></clipPath></defs>
+    <path d="${egg}" transform="translate(4,4)" fill="#221A3D"/>
+    <g clip-path="url(#${uidc})">${bandPaths}
+      <circle cx="34" cy="30" r="5" fill="#fff" opacity="0.9"/><circle cx="64" cy="52" r="4" fill="#fff" opacity="0.85"/><circle cx="36" cy="72" r="3.5" fill="#fff" opacity="0.85"/><circle cx="70" cy="80" r="3" fill="#fff" opacity="0.8"/>
+      <ellipse cx="34" cy="44" rx="6" ry="16" fill="#fff" opacity="0.35" transform="rotate(20 34 44)"/>
+    </g>
+    <path d="${egg}" fill="none" stroke="#221A3D" stroke-width="3"/>
+    <path d="M41,14 L47,21 L44,26 L51,31 L49,36" fill="none" stroke="#221A3D" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M86,10 L88,16 L94,18 L88,20 L86,26 L84,20 L78,18 L84,16 Z" fill="#FFD447" stroke="#221A3D" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M14,22 L15.3,26 L19,27 L15.3,28 L14,32 L12.7,28 L9,27 L12.7,26 Z" fill="#00C2FF" stroke="#221A3D" stroke-width="1.2" stroke-linejoin="round"/>
+  </svg>`;
+}
+function sevlingIsHatching(s){ return !s.image && game.unlockedSevlings.includes(s.id); }
+function hatchingNoteHtml(s){ return sevlingIsHatching(s) ? `<div class="hatching-note">Hatching soon</div>` : ''; }
+const sevlingArtProbe = {}; // id -> 'pending' | 'yes' | 'no', reset for 'no' each time the app comes back to the front
+function probeImage(src){
+  return new Promise(res=>{ const img = new Image(); img.onload = ()=>res(true); img.onerror = ()=>res(false); img.src = src + '?check=' + Date.now(); });
+}
+function probeSevlingArt(s){
+  if(s.image || sevlingArtProbe[s.id]) return;
+  sevlingArtProbe[s.id] = 'pending';
+  probeImage(`${s.id}.png`).then(async found=>{
+    if(!found){ sevlingArtProbe[s.id] = 'no'; return; }
+    const [blink, happy] = await Promise.all([probeImage(`${s.id}-blink.png`), probeImage(`${s.id}-happy.png`)]);
+    s.image = `${s.id}.png`;
+    if(blink && happy){ s.imageBlink = `${s.id}-blink.png`; s.imageHappy = `${s.id}-happy.png`; }
+    sevlingArtProbe[s.id] = 'yes';
+    sevlingArtArrived(s);
+  });
+}
+const SEVLING_STATIC_VIEWS = ['sevlings','sevling-care','results','trophies'];
+function sevlingArtArrived(s){
+  // Screens that just display Sevlings are simply redrawn. In games, only the egg itself is
+  // swapped, so a game in progress is never disturbed (Snake and Maze Munch redraw every tick anyway).
+  if(SEVLING_STATIC_VIEWS.includes(state.view)){ render(); return; }
+  document.querySelectorAll(`[data-sevling-egg="${s.id}"]`).forEach(el=>{
+    const holder = document.createElement('div');
+    holder.innerHTML = sevlingIcon(s, false, true);
+    if(holder.firstElementChild) el.replaceWith(holder.firstElementChild);
+  });
+}
+function retrySevlingArtProbes(){
+  let retried = false;
+  Object.keys(sevlingArtProbe).forEach(id=>{ if(sevlingArtProbe[id]==='no'){ delete sevlingArtProbe[id]; retried = true; } });
+  if(retried && SEVLING_STATIC_VIEWS.includes(state.view)) render();
+}
 function sevlingIcon(s, locked, faceOnly, noAnim){
+  if(!locked && !s.image){
+    probeSevlingArt(s);
+    return sevlingEggSvg(s, faceOnly || noAnim);
+  }
   const zoom = faceOnly ? 'transform:scale(1.9);transform-origin:50% 30%;' : '';
   if(s.image){
     // Idle blink/happy animation only applies to the main unlocked display contexts
@@ -1535,6 +1600,7 @@ function sevlingProgressHtml(p){
     const s = p.newSevling;
     return `<div class="card reward-card" style="border-top-color:var(--gold);">
       <div class="reward-icon sevling-icon">${sevlingIcon(s, false)}</div>
+      ${hatchingNoteHtml(s)}
       <div class="reward-name">You won ${escapeHtml(s.name)}!</div>
       <p class="muted" style="margin:0.2rem 0 0 0;">New in your ${collectionLabel(s.collection)} Sevlings collection</p>
     </div>`;
@@ -1621,6 +1687,7 @@ function sevlingTile(s){
     ${mood}
     ${worn ? `<div class="sevling-worn-badges">${worn}</div>` : ''}
     <div class="item-name">${unlocked ? escapeHtml(s.name) : '???'}</div>
+    ${unlocked ? hatchingNoteHtml(s) : ''}
   </div>`;
 }
 function trophyTile(emoji, label, count){
@@ -1688,6 +1755,7 @@ function renderSevlingCare(){
     <button class="btn-ghost" id="btn-back-sevlings">\u2190 Back to Sevlings</button>
     <div class="card" style="text-align:center;">
       <div class="reward-icon sevling-icon">${sevlingIcon(s, false)}</div>
+      ${hatchingNoteHtml(s)}
       ${wornEmoji ? `<div class="sevling-worn-badges" style="margin-top:0.4rem;">${wornEmoji}</div>` : ''}
       <h2 class="section-title" style="text-align:center;">${escapeHtml(s.name)}</h2>
       <p class="muted" style="margin-top:-0.3rem;">${collectionLabel(s.collection)} collection</p>
@@ -1734,6 +1802,7 @@ function stopAllArcadeIntervals(){
   if(snakeLoopInterval){ clearInterval(snakeLoopInterval); snakeLoopInterval = null; }
   if(mazeLoopInterval){ clearInterval(mazeLoopInterval); mazeLoopInterval = null; }
   if(arcadeRafId){ cancelAnimationFrame(arcadeRafId); arcadeRafId = null; }
+  stopEngineHum();
   clearRacerRevealTimer();
 }
 const GAME_ITEM_NAMES = ['a squeaky toy','a tasty treat','a chew toy','a special snack','a bouncy ball','a bone'];
@@ -1843,6 +1912,7 @@ function renderArcade(){
     state.view = 'arcade-maze'; render();
   };
   document.getElementById('btn-play-brick').onclick = async ()=>{
+    getGameAudio();
     game.selectedBrickSevling = document.getElementById('brick-sevling').value || null;
     await saveGame();
     state.brick = newBrickBreaker();
@@ -2222,6 +2292,39 @@ function startArcadeRaf(step){
   arcadeRafId = requestAnimationFrame(frame);
 }
 function pauseArcadeCountdown(){ if(arcadeTickInterval){ clearInterval(arcadeTickInterval); arcadeTickInterval = null; } }
+// iPad/iPhone Safari can throw away what's been drawn on a canvas when the app goes into the
+// background or runs short of memory (the canvas comes back blank). Two defences:
+// 1) the pre-drawn backgrounds (Brick Breaker board, Racer track) are rebuilt whenever the app
+//    comes back to the front, whenever Safari reports a lost canvas, and if a spot-check finds
+//    them blank; 2) every frame first paints the whole screen, so nothing can ever smear.
+// The on-screen canvas is also reused between redraws rather than a new one being made each
+// time, which keeps memory use down.
+const persistentCanvases = {};
+function adoptPersistentCanvas(id){
+  const fresh = document.getElementById(id);
+  if(!fresh) return null;
+  let keep = persistentCanvases[id];
+  if(!keep){ persistentCanvases[id] = fresh; watchCanvasLoss(fresh); return fresh; }
+  keep.className = fresh.className;
+  keep.setAttribute('aria-label', fresh.getAttribute('aria-label')||'');
+  fresh.replaceWith(keep);
+  return keep;
+}
+function invalidateGameImageCaches(){
+  bbBgCanvas = null;
+  if(racerTrackCache) racerTrackCache.image = null;
+}
+function watchCanvasLoss(c){
+  c.addEventListener('contextlost', invalidateGameImageCaches);
+  c.addEventListener('contextrestored', ()=>{ invalidateGameImageCaches(); c.dataset.ready = ''; });
+}
+function canvasLooksBlank(c){
+  try{ return c.getContext('2d').getImageData(1, 1, 1, 1).data[3] === 0; }catch(e){ return false; }
+}
+let lastBlankCheckAt = 0;
+function blankCheckDue(){ const now = performance.now(); if(now - lastBlankCheckAt < 1500) return false; lastBlankCheckAt = now; return true; }
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') invalidateGameImageCaches(); });
+window.addEventListener('pageshow', invalidateGameImageCaches);
 function prepCanvas(id, w, h){
   const c = document.getElementById(id);
   if(!c) return null;
@@ -2264,6 +2367,101 @@ function sevlingSelectOptions(won, selectedId, classicLabel){
     : `<option value="">No Sevlings to select yet</option>`;
 }
 function ordinal(n){ return n===1?'1st':n===2?'2nd':n===3?'3rd':n+'th'; }
+
+// ---- Game sound effects (Web Audio, synthesised, no audio files) ----
+// One shared AudioContext. Browsers (iOS especially) only allow sound after a tap, so the
+// context is created or resumed on every tap/click anywhere in the app. Note: on iPhone/iPad the
+// ring/silent switch mutes Web Audio, so these sounds won't play with the switch on silent.
+let gameAudioCtx = null;
+function getGameAudio(){
+  if(!gameAudioCtx){
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return null;
+    try{ gameAudioCtx = new AC(); }catch(e){ return null; }
+  }
+  if(gameAudioCtx.state==='suspended'){ try{ gameAudioCtx.resume(); }catch(e){} }
+  return gameAudioCtx;
+}
+window.addEventListener('pointerdown', ()=>{ if(state.view && state.view.startsWith('arcade')) getGameAudio(); }, true);
+window.addEventListener('keydown', ()=>{ if(state.view && state.view.startsWith('arcade')) getGameAudio(); }, true);
+
+// Brick Breaker: a short, bouncy upward pitch slide (a tiny laser blip / spring) on every brick hit.
+let lastBrickBlipAt = 0;
+function sfxBrickBlip(rowIndex){
+  const ctx = getGameAudio();
+  if(!ctx || ctx.state!=='running') return;
+  const now = ctx.currentTime;
+  if(now - lastBrickBlipAt < 0.035) return; // multi-ball and lasers can hit lots at once, don't pile up
+  lastBrickBlipAt = now;
+  const start = 330 + (5 - Math.min(5, rowIndex||0))*40 + Math.random()*30; // higher rows sound a touch higher
+  const osc = ctx.createOscillator(), gain = ctx.createGain();
+  osc.type = 'square';
+  osc.frequency.setValueAtTime(start, now);
+  osc.frequency.exponentialRampToValueAtTime(start*2.6, now + 0.09);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.07, now + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.13);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(now); osc.stop(now + 0.15);
+}
+
+// Overhead Racer: a continuous, gentle engine hum whose pitch follows the car's speed.
+// A soft sawtooth plus a sine an octave below, through a low-pass filter to keep it mellow.
+let engineHum = null;
+function startEngineHum(){
+  const ctx = getGameAudio();
+  if(!ctx || ctx.state!=='running' || engineHum) return;
+  const saw = ctx.createOscillator(), sub = ctx.createOscillator();
+  const filter = ctx.createBiquadFilter(), gain = ctx.createGain();
+  saw.type = 'sawtooth'; sub.type = 'sine';
+  saw.frequency.value = 60; sub.frequency.value = 30;
+  filter.type = 'lowpass'; filter.frequency.value = 420; filter.Q.value = 0.7;
+  gain.gain.value = 0.0001;
+  saw.connect(filter); sub.connect(filter); filter.connect(gain).connect(ctx.destination);
+  saw.start(); sub.start();
+  engineHum = { ctx, saw, sub, filter, gain };
+}
+function updateEngineHum(speedFrac, volume){
+  if(!engineHum) startEngineHum();
+  if(!engineHum) return;
+  const { ctx, saw, sub, filter, gain } = engineHum;
+  const t = ctx.currentTime;
+  const f = 55 + Math.max(0, Math.min(1.8, speedFrac)) * 95; // idle ~55Hz, top speed ~150Hz, turbo higher
+  saw.frequency.setTargetAtTime(f, t, 0.08);
+  sub.frequency.setTargetAtTime(f/2, t, 0.08);
+  filter.frequency.setTargetAtTime(300 + f*2.5, t, 0.1);
+  gain.gain.setTargetAtTime(Math.max(0.0001, volume), t, 0.12);
+}
+function stopEngineHum(){
+  if(!engineHum) return;
+  const { ctx, saw, sub, gain } = engineHum;
+  engineHum = null;
+  try{
+    const t = ctx.currentTime;
+    gain.gain.cancelScheduledValues(t);
+    gain.gain.setTargetAtTime(0.0001, t, 0.05);
+    saw.stop(t + 0.3); sub.stop(t + 0.3);
+  }catch(e){}
+}
+// When the app goes into the background the game loop pauses, so silence the engine too.
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') stopEngineHum(); });
+
+// Overhead Racer: a cheerful, high two-tone chime when a pit-stop spelling is right.
+function sfxStarChime(){
+  const ctx = getGameAudio();
+  if(!ctx || ctx.state!=='running') return;
+  const now = ctx.currentTime;
+  [[1046.5, 0], [1568.0, 0.12]].forEach(([freq, delay])=>{ // C6 then G6
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(freq, now + delay);
+    gain.gain.setValueAtTime(0.0001, now + delay);
+    gain.gain.exponentialRampToValueAtTime(0.18, now + delay + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + delay + 0.35);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now + delay); osc.stop(now + delay + 0.4);
+  });
+}
 
 // Keyboard support for the two canvas games (touch controls are the main input, this is
 // a bonus for laptops). Ignored whenever a text box has focus, so typing a spelling works.
@@ -2359,6 +2557,7 @@ function bbFixAngle(b, sp){
 }
 function bbHitBrick(bb, brick){
   brick.hp--;
+  sfxBrickBlip(Math.round((brick.y - BB_TOP) / (BB_BRICK_H + BB_GAP)));
   bb.score += 5;
   if(brick.hp<=0){
     brick.alive = false;
@@ -2490,7 +2689,7 @@ function bbStep(bb, dt){
 }
 let bbBgCanvas = null;
 function bbBackground(dpr){
-  if(bbBgCanvas && bbBgCanvas._dpr===dpr) return bbBgCanvas;
+  if(bbBgCanvas && bbBgCanvas._dpr===dpr && !(blankCheckDue() && canvasLooksBlank(bbBgCanvas))) return bbBgCanvas;
   const c = document.createElement('canvas');
   c.width = BB_W*dpr; c.height = BB_H*dpr; c._dpr = dpr;
   const x = c.getContext('2d'); x.scale(dpr, dpr);
@@ -2502,6 +2701,7 @@ function bbBackground(dpr){
   });
   x.fillStyle = 'rgba(34,26,61,0.07)';
   for(let gy=12; gy<BB_H; gy+=24) for(let gx=12; gx<BB_W; gx+=24) x.fillRect(gx-1, gy-1, 2, 2);
+  watchCanvasLoss(c);
   bbBgCanvas = c;
   return c;
 }
@@ -2510,6 +2710,8 @@ function bbDraw(bb){
   if(!cv) return;
   const { ctx, dpr } = cv;
   ctx.setTransform(1,0,0,1,0,0);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = FOIL.bg; ctx.fillRect(0, 0, cv.c.width, cv.c.height);
   ctx.drawImage(bbBackground(dpr), 0, 0);
   ctx.setTransform(dpr,0,0,dpr,0,0);
   // Bricks as stickers; power-up bricks get the holographic foil finish and their icon.
@@ -2525,7 +2727,13 @@ function bbDraw(bb){
       }
     }
     if(br.power){
-      ctx.font = `14px ${GAME_EMOJI_FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      // White badge behind the icon, and a plain solid fill for the text: Safari on iPad paints
+      // emoji with the current fill, so drawing it with the brick's rainbow gradient made the
+      // icon vanish into the brick (the falling capsules were fine as they use a solid colour).
+      ctx.fillStyle = FOIL.white; ctx.beginPath(); ctx.arc(br.x+br.w/2, br.y+br.h/2, 9, 0, Math.PI*2); ctx.fill();
+      ctx.lineWidth = 1.5; ctx.strokeStyle = FOIL.ink; ctx.stroke();
+      ctx.fillStyle = FOIL.ink;
+      ctx.font = `13px ${GAME_EMOJI_FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(BB_POWERS[br.power].emoji, br.x+br.w/2, br.y+br.h/2+1);
     }
   });
@@ -2534,6 +2742,7 @@ function bbDraw(bb){
     ctx.fillStyle = FOIL.ink; ctx.beginPath(); ctx.arc(d.x+2, d.y+2, 14, 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = BB_POWERS[d.kind].colour; ctx.beginPath(); ctx.arc(d.x, d.y, 14, 0, Math.PI*2); ctx.fill();
     ctx.lineWidth = 2; ctx.strokeStyle = FOIL.ink; ctx.stroke();
+    ctx.fillStyle = FOIL.ink;
     ctx.font = `15px ${GAME_EMOJI_FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(BB_POWERS[d.kind].emoji, d.x, d.y+1);
   });
@@ -2609,7 +2818,7 @@ function renderBrickBreaker(){
   `;
   document.getElementById('btn-back-arcade').onclick = ()=>{ stopAllArcadeIntervals(); state.view='arcade'; render(); };
   document.getElementById('btn-bb-restart').onclick = ()=>{ if((game.arcadeMs||0)<=0) return; stopAllArcadeIntervals(); state.brick = newBrickBreaker(); render(); };
-  const canvas = document.getElementById('bb-canvas');
+  const canvas = adoptPersistentCanvas('bb-canvas');
   const toLogicalX = (e)=>{ const r = canvas.getBoundingClientRect(); return (e.clientX - r.left) / r.width * BB_W; };
   canvas.onpointerdown = (e)=>{ e.preventDefault(); try{ canvas.setPointerCapture(e.pointerId); }catch(_){} if(state.brick) state.brick.pointerX = toLogicalX(e); bbLaunch(); };
   canvas.onpointermove = (e)=>{ if(state.brick && (e.pointerType==='mouse' || e.buttons)) state.brick.pointerX = toLogicalX(e); };
@@ -2680,7 +2889,7 @@ function racerBuildTrack(){
   return racerTrackCache;
 }
 function racerTrackImage(track, scale){
-  if(track.image && track.imageScale===scale) return track.image;
+  if(track.image && track.imageScale===scale && !(blankCheckDue() && canvasLooksBlank(track.image))) return track.image;
   const c = document.createElement('canvas');
   c.width = Math.round(track.worldW*scale); c.height = Math.round(track.worldH*scale);
   const x = c.getContext('2d'); x.scale(scale, scale);
@@ -2737,6 +2946,7 @@ function racerTrackImage(track, scale){
     [-14, 2].forEach(cx=>{ x.beginPath(); x.moveTo(cx,-11); x.lineTo(cx+12,-1); x.lineTo(cx,9); x.lineTo(cx+5,-1); x.closePath(); x.fill(); });
     x.restore();
   });
+  watchCanvasLoss(c);
   track.image = c; track.imageScale = scale;
   return c;
 }
@@ -2924,12 +3134,14 @@ function racerDraw(r){
   const half = RACER_VIEW/RACER_ZOOM/2;
   const camX = Math.max(half, Math.min(track.worldW - half, player.x));
   const camY = Math.max(half, Math.min(track.worldH - half, player.y));
-  // The pre-drawn track image is capped at about 8 million pixels, comfortably inside iOS canvas limits.
-  const img = racerTrackImage(track, Math.min(dpr, Math.sqrt(8e6/(track.worldW*track.worldH))));
+  // The pre-drawn track image is capped at about 6 million pixels, comfortably inside iOS canvas memory limits.
+  const img = racerTrackImage(track, Math.min(dpr, Math.sqrt(6e6/(track.worldW*track.worldH))));
   const sc = img.width / track.worldW;
   const sx = Math.max(0, (camX-half)*sc), sy = Math.max(0, (camY-half)*sc);
   const sw = Math.min(half*2*sc, img.width - sx), sh = Math.min(half*2*sc, img.height - sy);
   ctx.setTransform(1,0,0,1,0,0);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = FOIL.bg; ctx.fillRect(0, 0, cv.c.width, cv.c.height);
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cv.c.width, cv.c.height);
   const z = RACER_ZOOM*dpr;
   ctx.setTransform(z,0,0,z, (half-camX)*z, (half-camY)*z);
@@ -2982,6 +3194,10 @@ function racerLoopStep(dt){
   racerStep(r, dt);
   racerDraw(r);
   const player = r.cars[0];
+  // Engine hum: quiet idle on the grid, follows speed while racing, hushed for pit-stop questions
+  // (so the spoken word is clear), and off once the race is over.
+  if(r.phase==='finished') stopEngineHum();
+  else updateEngineHum(player.speed / RACER_MAX_SPEED, r.prompt ? 0.0001 : (r.phase==='countdown' ? 0.03 : 0.05));
   const pos = racerPositions(r).indexOf(player) + 1;
   setTextIfChanged('racer-lap', `${Math.min(RACER_LAPS, Math.max(1, player.laps+1))}/${RACER_LAPS}`);
   setTextIfChanged('racer-pos', ordinal(pos));
@@ -3022,7 +3238,8 @@ function racerCheck(){
     const player = r.cars[0];
     player.turboT = 2.6; player.turboMul = 1.55; player.speed = Math.max(player.speed, RACER_MAX_SPEED*1.3);
     r.boostsEarned++;
-    r.banner = 'Spelling turbo! \uD83D\uDE80'; r.bannerUntil = r.time + 2;
+    r.banner = 'Spelling star! \u2B50 Turbo!'; r.bannerUntil = r.time + 2;
+    sfxStarChime();
   }
   render();
   // A clean correct answer gets straight back to racing; a near miss or wrong answer waits
@@ -3148,6 +3365,7 @@ function renderRacerSetup(){
   startBtn.onclick = async ()=>{
     if((game.arcadeMs||0)<=0 || !(game.racerListIds||[]).length) return;
     unlockSpeech(); // must run synchronously inside the tap, before any await, so questions can speak
+    getGameAudio(); // same for game sounds
     const esSel = document.getElementById('racer-es-mode');
     game.racerSpanishMode = esSel ? esSel.value : (game.racerSpanishMode||'copy');
     game.racerDifficulty = document.getElementById('racer-difficulty').value;
@@ -3223,7 +3441,7 @@ function renderRacer(){
     b.oncontextmenu = (e)=>e.preventDefault();
   };
   holdBtn('racer-left', -1); holdBtn('racer-right', 1);
-  const canvas = document.getElementById('racer-canvas');
+  const canvas = adoptPersistentCanvas('racer-canvas');
   const zoneSteer = (e)=>{ const rect = canvas.getBoundingClientRect(); setSteer((e.clientX - rect.left) < rect.width/2 ? -1 : 1); };
   canvas.onpointerdown = (e)=>{ e.preventDefault(); try{ canvas.setPointerCapture(e.pointerId); }catch(_){} zoneSteer(e); };
   canvas.onpointermove = (e)=>{ if(e.buttons) zoneSteer(e); };
