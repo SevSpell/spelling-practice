@@ -186,7 +186,7 @@ const app = document.getElementById('app');
 // GitHub (bypassing every cache), reads the APP_VERSION inside it, and if it differs from the
 // one running, offers (or, on the sign-in/profile screens, just does) a reload. This matters most
 // for the iOS home-screen version, which otherwise keeps running an old cached copy.
-const APP_VERSION = '2026-09-30.7';
+const APP_VERSION = '2026-09-30.8';
 let latestSeenVersion = null, lastUpdateCheckAt = 0;
 function freshUrl(){ return location.origin + location.pathname + '?v=' + Date.now(); }
 async function fetchLatestVersion(){
@@ -791,6 +791,77 @@ async function extractWords(b64, lang){
   if(lang==='en') return parsed.map(w=>({ spanish:'', english:cleanExtractedWord(w.english) })).filter(w=>w.english);
   return parsed.map(w=>({ spanish:cleanExtractedWord(w.spanish), english:cleanExtractedWord(w.english) })).filter(w=>w.spanish||w.english);
 }
+// ---------- Pasted text lists ----------
+// Reads a word list pasted as text, e.g. a table Gemini (or anyone) produced outside the app:
+//   | 16 | dieciséis |      markdown table rows (header and |---| lines are skipped)
+//   el perro<TAB>the dog    copied from a spreadsheet
+//   el perro - the dog      or "=", ":", "–", "," between the two words
+//   because                 one word per line (English lists)
+// For Spanish lists it works out which column is the Spanish one (accents, ñ, ¿¡, common
+// Spanish words), and treats a column of plain numbers as the English side, so "16 | dieciséis"
+// becomes English "16", Spanish "dieciséis". The review screen has a swap button if it guesses wrong.
+const PASTE_SPANISH_HINTS = /[áéíóúñü¿¡]|\b(el|la|los|las|un|una|unos|unas|y|de|del|es|son|que|en|por|para|muy|mi|tu|su|con|sin)\b|(ción|cion|dad|mente|ito|ita|illo|illa|ar|er|ir)$/i;
+const PASTE_ENGLISH_HINTS = /\b(the|a|an|to|and|of|is|are|my|your|with|without|very|I|you|he|she|it|we|they)\b|(tion|ness|ing|ed|ly|ful|less|ight|ough)$/i;
+function stripPasteMarkup(t){
+  return (t||'').replace(/\*\*|__|`/g,'').replace(/^\s*[-*•]\s+/, '').trim();
+}
+function splitPastedLine(line){
+  const t = line.trim();
+  if(t.includes('|')) return t.replace(/^\|/, '').replace(/\|$/, '').split('|').map(stripPasteMarkup);
+  if(t.includes('\t')) return t.split('\t').map(stripPasteMarkup);
+  for(const sep of [' = ', ' \u2013 ', ' \u2014 ', ' - ', ': ', ' : ']){
+    if(t.includes(sep)){ const i = t.indexOf(sep); return [t.slice(0,i), t.slice(i+sep.length)].map(stripPasteMarkup); }
+  }
+  if(t.includes(',') && t.split(',').length===2) return t.split(',').map(stripPasteMarkup);
+  return [stripPasteMarkup(t)];
+}
+function isPasteSeparator(line){ return /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(line); }
+function isPureNumber(c){ return /^\d+$/.test((c||'').trim()); }
+function cleanPastedCell(c){ return isPureNumber(c) ? c.trim() : cleanExtractedWord(c); }
+function parsePastedWords(text, lang){
+  const lines = (text||'').split(/\r?\n/);
+  let header = null;
+  const rows = [];
+  lines.forEach((line, i)=>{
+    if(!line.trim() || isPasteSeparator(line)) return;
+    const next = lines.slice(i+1).find(l=>l.trim());
+    const cells = splitPastedLine(line).filter((c,ci,arr)=>!(c==='' && (ci===0 || ci===arr.length-1)));
+    // A row followed by a |---| line is a table header, use it to tell the columns apart
+    if(next && isPasteSeparator(next) && !rows.length && !header){ header = cells.map(c=>c.toLowerCase()); return; }
+    if(cells.some(c=>c)) rows.push(cells);
+  });
+  if(!rows.length) return [];
+  const width = Math.max(...rows.map(r=>r.length));
+  if(lang==='en'){
+    // English lists: one word per row, take the cell with letters in it (skips numbering columns)
+    return rows.map(r=>{ const cell = r.filter(c=>/[a-z]/i.test(c)).pop() || ''; return { spanish:'', english:cleanExtractedWord(cell) }; }).filter(w=>w.english);
+  }
+  let cols = Array.from({length:width}, (_,i)=>i);
+  // Three or more columns with a numbering column first: drop the numbering
+  if(width>=3 && rows.every(r=>isPureNumber(r[0]) || !r[0])) cols = cols.slice(1);
+  if(cols.length===1){
+    return rows.map(r=>({ spanish:cleanPastedCell(r[cols[0]]||''), english:'' })).filter(w=>w.spanish);
+  }
+  const [c1, c2] = cols;
+  let spanishCol = null;
+  if(header){
+    const h1 = header[c1]||'', h2 = header[c2]||'';
+    if(/span|espa/.test(h1) || /engl|ingl|num|n\u00fam/.test(h2)) spanishCol = c1;
+    else if(/span|espa/.test(h2) || /engl|ingl|num|n\u00fam/.test(h1)) spanishCol = c2;
+  }
+  if(spanishCol===null){
+    const score = (col)=>rows.reduce((sum,r)=>{
+      const c = (r[col]||'').trim();
+      if(isPureNumber(c)) return sum - 3; // numbers are the English side ("16" -> "dieciséis")
+      return sum + (PASTE_SPANISH_HINTS.test(c)?1:0) - (PASTE_ENGLISH_HINTS.test(c)?1:0)
+        + (/[ao]s?$/i.test(c) ? 0.5 : 0)        // Spanish words often end in -a/-o
+        - (/k|w|th|sh|ee|oo|y$/i.test(c) ? 0.5 : 0); // letter patterns rare in Spanish
+    }, 0);
+    spanishCol = score(c2) > score(c1) ? c2 : c1; // tie: assume Spanish first, the review screen can swap
+  }
+  const englishCol = spanishCol===c1 ? c2 : c1;
+  return rows.map(r=>({ spanish:cleanPastedCell(r[spanishCol]||''), english:cleanPastedCell(r[englishCol]||'') })).filter(w=>w.spanish||w.english);
+}
 function cleanExtractedWord(s){
   return (s||'')
     .trim()
@@ -1262,6 +1333,12 @@ function renderUpload(){
       </button>
       <button class="btn-ghost" id="btn-manual">Add words without a photo</button>
     </div>
+    <div class="card" style="margin-top:1.2rem;">
+      <h3 style="margin-top:0;">Or paste the words as text</h3>
+      <p class="muted">Paste a table or list, for example from Gemini, a spreadsheet or an email. ${lang==='en' ? 'One word per line works too.' : 'Each line needs the Spanish and the English, like <strong>| 16 | dieciséis |</strong> or <strong>el perro - the dog</strong>, in either order.'} No API key needed.</p>
+      <textarea id="paste-input" rows="7" placeholder="${lang==='en' ? 'because\nfriend\npeople' : '| 16 | dieciséis |\n| 17 | diecisiete |'}" autocapitalize="off" autocomplete="off" spellcheck="false" style="width:100%;font-family:inherit;font-size:1rem;border:2px solid var(--ink);border-radius:12px;padding:0.7rem;box-sizing:border-box;resize:vertical;background:var(--surface);color:var(--ink);">${escapeHtml(state.pasteDraft||'')}</textarea>
+      <button class="btn-primary btn-block" id="btn-read-paste" style="margin-top:0.7rem;">Read pasted words</button>
+    </div>
     <div style="margin-top:1.2rem;">
       <button class="btn-ghost" id="btn-back">Back</button>
     </div>
@@ -1304,6 +1381,16 @@ function renderUpload(){
       render();
     }
   };
+  document.getElementById('paste-input').oninput = (e)=>{ state.pasteDraft = e.target.value; };
+  document.getElementById('btn-read-paste').onclick = ()=>{
+    const text = document.getElementById('paste-input').value;
+    state.pasteDraft = text;
+    const words = parsePastedWords(text, lang);
+    if(!words.length){ state.error = "Couldn't find any words in that text. Check it's pasted in, or add the words by hand."; render(); return; }
+    state.extractedWords = words; state.listLabelDraft = todayLabel(); state.error = '';
+    state.pasteDraft = '';
+    state.view = 'review'; render();
+  };
   document.getElementById('btn-manual').onclick = ()=>{
     state.extractedWords = [{ spanish:'', english:'' }];
     state.listLabelDraft = todayLabel(); state.error = ''; state.view = 'review'; render();
@@ -1324,7 +1411,10 @@ function renderReview(){
       <thead><tr>${lang==='en' ? '<th>English word</th>' : '<th>Spanish</th><th>English</th>'}<th></th></tr></thead>
       <tbody id="review-body">${state.extractedWords.map((w,i)=>reviewRow(w,i,lang)).join('')}</tbody>
     </table>
-    <button class="btn-secondary" id="btn-add-row">Add a word</button>
+    <div class="btn-row">
+      <button class="btn-secondary" id="btn-add-row">Add a word</button>
+      ${lang==='en' ? '' : `<button class="btn-secondary" id="btn-swap-cols">\u21C4 Swap Spanish and English</button>`}
+    </div>
     <h3 class="section-title" style="margin-top:1.4rem;">List name</h3>
     <input type="text" id="label-input" value="${escapeHtml(state.listLabelDraft)}">
     <div class="btn-row" style="margin-top:1.2rem;">
@@ -1334,6 +1424,8 @@ function renderReview(){
   `;
   wireReviewRows();
   document.getElementById('btn-add-row').onclick = ()=>{ state.extractedWords.push({ spanish:'', english:'' }); render(); };
+  const swapBtn = document.getElementById('btn-swap-cols');
+  if(swapBtn) swapBtn.onclick = ()=>{ state.extractedWords = state.extractedWords.map(w=>({ spanish:w.english, english:w.spanish })); render(); };
   document.getElementById('label-input').oninput = (e)=>{ state.listLabelDraft = e.target.value; };
   document.getElementById('btn-save').onclick = async ()=>{
     const words = lang==='en'
