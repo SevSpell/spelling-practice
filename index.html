@@ -148,6 +148,12 @@
   .sevling-locked-img{ filter:brightness(0); }
   .sevling-worn-badges{ font-size:0.95rem; margin-bottom:0.2rem; }
   .game-card{ padding:0.5rem; }
+  .page.page-wide{ max-width:1000px; padding-left:0.75rem; padding-right:0.75rem; }
+  .snake-wrap{ display:flex; justify-content:center; }
+  /* Board fills the width available, but never so tall that the arrows drop off the screen */
+  .snake-board{ position:relative; width:min(100%, calc(100vh - 400px)); width:min(100%, calc(100dvh - 400px)); min-width:min(100%, 280px); aspect-ratio:1/1; background:var(--bg); border:2px solid var(--ink); border-radius:12px; box-shadow:var(--shadow-ink); overflow:hidden; touch-action:none; -webkit-user-select:none; user-select:none; }
+  .snake-pad{ max-width:300px; margin:0.9rem auto 0; display:grid; grid-template-columns:repeat(3,1fr); gap:0.5rem; }
+  .snake-btn{ font-size:1.8rem; padding:1.1rem 0; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
   .game-stage{ position:relative; width:100%; max-width:560px; margin:0 auto; border:2px solid var(--ink); border-radius:12px; overflow:hidden; background:var(--bg); }
   .game-canvas{ display:block; width:100%; height:100%; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; cursor:pointer; }
   .game-face{ position:absolute; aspect-ratio:1/1; transform:translate(-50%,-50%); border-radius:50%; border:2px solid var(--ink); background:#fff; overflow:hidden; pointer-events:none; z-index:2; }
@@ -186,7 +192,7 @@ const app = document.getElementById('app');
 // GitHub (bypassing every cache), reads the APP_VERSION inside it, and if it differs from the
 // one running, offers (or, on the sign-in/profile screens, just does) a reload. This matters most
 // for the iOS home-screen version, which otherwise keeps running an old cached copy.
-const APP_VERSION = '2026-09-30.8';
+const APP_VERSION = '2026-11-10.2';
 let latestSeenVersion = null, lastUpdateCheckAt = 0;
 function freshUrl(){ return location.origin + location.pathname + '?v=' + Date.now(); }
 async function fetchLatestVersion(){
@@ -254,7 +260,7 @@ const SEVLINGS = [
   { id:'clipper', name:'Clipper', collection:'sea', features:'<circle cx="24" cy="55" r="15"/><circle cx="96" cy="55" r="15"/>' },
   { id:'patrick', name:'Patrick', collection:'sea', noBody:true, features:'<path d="M60,8 L71,42 L107,42 L78,64 L89,100 L60,79 L31,100 L42,64 L13,42 L49,42 Z"/>' },
   { id:'sword', name:'Sword', collection:'sea', image:'sword.png', imageBlink:'sword-blink.png', imageHappy:'sword-happy.png', features:'<path d="M24,50 L-28,46 L24,76 Z"/><path d="M65,15 L72,0 L80,17 Z"/>' },
-  { id:'wally', name:'Wally', collection:'sea', features:'<path d="M45,105 Q60,128 75,105 Q60,116 45,105 Z"/><path d="M68,15 L76,2 L84,17 Z"/>' },
+  { id:'shelly', name:'Shelly', collection:'sea', features:'<ellipse cx="6" cy="92" rx="30" ry="10" transform="rotate(32 6 92)"/><ellipse cx="114" cy="92" rx="30" ry="10" transform="rotate(-32 114 92)"/><ellipse cx="38" cy="108" rx="12" ry="8"/><ellipse cx="82" cy="108" rx="12" ry="8"/><circle cx="60" cy="10" r="13"/>' },
   { id:'lotyl', name:'Lotyl', collection:'sea', image:'lotyl.png', imageBlink:'lotyl-blink.png', imageHappy:'lotyl-happy.png', features:'<path d="M22,30 Q8,25 12,38 Q20,35 22,30 Z"/><path d="M20,42 Q4,40 10,52 Q18,48 20,42 Z"/><path d="M24,54 Q8,55 16,66 Q22,60 24,54 Z"/><path d="M98,30 Q112,25 108,38 Q100,35 98,30 Z"/><path d="M100,42 Q116,40 110,52 Q102,48 100,42 Z"/><path d="M96,54 Q112,55 104,66 Q98,60 96,54 Z"/>' },
   { id:'pearl', name:'Pearl', collection:'sea', features:'<ellipse cx="60" cy="50" rx="46" ry="28"/>' },
   { id:'puggle', name:'Puggle', collection:'pets', image:'puggle.png', imageBlink:'puggle-blink.png', imageHappy:'puggle-happy.png', features:'<ellipse cx="20" cy="38" rx="11" ry="18" transform="rotate(-10 20 38)"/><ellipse cx="100" cy="38" rx="11" ry="18" transform="rotate(10 100 38)"/><ellipse cx="60" cy="72" rx="15" ry="10"/>' },
@@ -421,11 +427,28 @@ const state = {
   view: 'settings', lists: [], currentListId: null,
   uploadImageB64: null, uploadImagePreview: null, extractedWords: [], listLabelDraft: '',
   busy: false, error: '', settingsMessage: '', firebaseConfigDraft: '', currentSevlingId: null, authMode: 'signin', practiceLang: 'es',
-  profiles: [], currentProfileId: null, addProfileMode: 'new', c4: null, snake: null, maze: null, brick: null, racer: null, wordSearch: null,
+  profiles: [], currentProfileId: null, addProfileMode: 'new', c4: null, snake: null, maze: null, brick: null, racer: null, shooter: null, wordSearch: null,
   practice: { mode:null, words:[], index:0, score:0, wrong:[], checked:false, lastCorrect:false, accentMissing:false, input:'', isRetry:false, reward:null, trophyVariant:null, newSevling:null }
 };
 
-function emptyGameState(){ return { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, listStreaks:{}, streakGoal:4, lastSevlingAt:null, cooldownDays:14, fullMarksSinceLastWin:0, arcadeMs:0, gameUnlockStreaks:{}, selectedSnakeSevling:null, selectedConnect4Sevling:null, selectedMazeSevling:null, selectedBrickSevling:null, selectedRacerSevling:null, racerListIds:[], racerSpanishMode:'copy', racerDifficulty:'speedy' }; }
+// Renamed Sevlings: old id -> new id. Saved progress (won Sevlings, their happiness and
+// accessories, and game character choices) is moved across when a profile's game data loads,
+// and saved under the new id the next time the game data is saved.
+const SEVLING_ID_RENAMES = { wally:'shelly' }; // Wally the whale became Shelly the turtle
+function migrateSevlingIds(g){
+  Object.entries(SEVLING_ID_RENAMES).forEach(([oldId, newId])=>{
+    if(Array.isArray(g.unlockedSevlings) && g.unlockedSevlings.includes(oldId)){
+      g.unlockedSevlings = g.unlockedSevlings.map(id=>id===oldId ? newId : id).filter((id,i,arr)=>arr.indexOf(id)===i);
+    }
+    if(g.sevlingCare && g.sevlingCare[oldId]){
+      if(!g.sevlingCare[newId]) g.sevlingCare[newId] = g.sevlingCare[oldId];
+      delete g.sevlingCare[oldId];
+    }
+    Object.keys(g).forEach(k=>{ if(/^selected.*Sevling$/.test(k) && g[k]===oldId) g[k] = newId; });
+  });
+  return g;
+}
+function emptyGameState(){ return { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, listStreaks:{}, streakGoal:4, lastSevlingAt:null, cooldownDays:14, fullMarksSinceLastWin:0, arcadeMs:0, gameUnlockStreaks:{}, selectedSnakeSevling:null, selectedConnect4Sevling:null, selectedMazeSevling:null, selectedBrickSevling:null, selectedRacerSevling:null, racerListIds:[], racerSpanishMode:'copy', racerDifficulty:'speedy', selectedShooterSevling:null, shooterListId:null }; }
 let game = emptyGameState();
 let settings = { firebaseConfig:null };
 let fbApp = null, db = null, auth = null, authUser = null;
@@ -704,6 +727,7 @@ async function loadGame(){
     if(d){
       const merged = Object.assign(empty, d);
       delete merged.selectedMazeEscapeSevling; // Maze Escape was removed, drop its old setting on next save
+      migrateSevlingIds(merged);
       return merged;
     }
   }catch(e){}
@@ -925,6 +949,7 @@ function lavaLampHtml(){
 
 function render(){
   stopSevlingAnimations();
+  app.classList.toggle('page-wide', state.view==='arcade-snake');
   if(state.view==='login') renderLogin();
   else if(state.view==='profiles') renderProfiles();
   else if(state.view==='add-profile') renderAddProfile();
@@ -943,6 +968,8 @@ function render(){
   else if(state.view==='arcade-brick') renderBrickBreaker();
   else if(state.view==='arcade-racer-setup') renderRacerSetup();
   else if(state.view==='arcade-racer') renderRacer();
+  else if(state.view==='arcade-shooter-setup') renderShooterSetup();
+  else if(state.view==='arcade-shooter') renderShooter();
   else if(state.view==='wordsearch-pick') renderWordSearchPicker();
   else if(state.view==='wordsearch') renderWordSearch();
   else if(state.view==='settings') renderSettings();
@@ -1719,7 +1746,7 @@ function arcadeProgressHtml(p){
     return `<div class="card reward-card" style="border-top-color:var(--blue);">
       <div class="reward-icon">\uD83C\uDFAE</div>
       <div class="reward-name">5 minutes of arcade games unlocked!</div>
-      <p class="muted" style="margin:0.2rem 0 0 0;">Play Connect 4 or Snake from the Arcade tab.</p>
+      <p class="muted" style="margin:0.2rem 0 0 0;">Play any of the games from the Arcade tab.</p>
     </div>`;
   }
   if((p.pct||0) < 90) return '';
@@ -1818,7 +1845,7 @@ function renderSevlings(){
   app.innerHTML = `
     ${navRow('sevlings')}
     <h2 class="section-title">Sevlings</h2>
-    <p class="muted">You've found ${unlockedCount} of ${SEVLINGS.length} Sevlings. Win a new one for every ${game.streakGoal||4} fully correct practices in a row with the *same* word list, plus a short wait. Progress is per list, so switching between lists doesn't add up, sticking with one list is what gets you there. The more full-mark practices you do (any list), the faster that wait counts down, right down to a week.</p>
+    <p class="muted">You've found ${unlockedCount} of ${SEVLINGS.length} Sevlings. Win a new one for every ${game.streakGoal||4} fully correct practices in a row with the <em>same</em> word list, plus a short wait. Progress is per list, so switching between lists doesn't add up, sticking with one list is what gets you there. The more full-mark practices you do (any list), the faster that wait counts down, right down to a week.</p>
     ${inProgress.length ? inProgress.map(l=>`<div class="card"><p class="muted" style="text-align:center;margin:0;"><strong>${escapeHtml(l.label)}</strong> (${l.lang==='en'?'English':'Spanish'}): ${sevlingsProgressLine(l.id, l.label)}</p></div>`).join('')
       : `<div class="card"><p class="muted" style="text-align:center;margin:0;">Pick a list and practise it a few times in a row, fully correct, to start winning Sevlings!</p></div>`}
     ${COLLECTIONS.map(([id,label])=>`
@@ -1896,6 +1923,7 @@ function stopAllArcadeIntervals(){
   if(arcadeRafId){ cancelAnimationFrame(arcadeRafId); arcadeRafId = null; }
   stopEngineHum();
   clearRacerRevealTimer();
+  clearShooterRevealTimer();
 }
 const GAME_ITEM_NAMES = ['a squeaky toy','a tasty treat','a chew toy','a special snack','a bouncy ball','a bone'];
 async function awardSevlingItem(sevlingId){
@@ -1941,6 +1969,7 @@ function renderArcade(){
     : `<option value="">No Sevlings to select yet</option>`;
   const brickOptions = sevlingSelectOptions(won, game.selectedBrickSevling, 'Classic paddle (no face)');
   const racerOptions = sevlingSelectOptions(won, game.selectedRacerSevling, 'Classic car (no driver)');
+  const shooterOptions = sevlingSelectOptions(won, game.selectedShooterSevling, 'Classic ship (no pilot)');
   app.innerHTML = `
     ${navRow('arcade')}
     <h2 class="section-title">Arcade</h2>
@@ -1984,6 +2013,13 @@ function renderArcade(){
       <select id="racer-sevling" ${won.length?'':'disabled'}>${racerOptions}</select>
       <button class="btn-primary btn-block" id="btn-play-racer" ${hasTime?'':'disabled'}>Choose words and race</button>
     </div>
+    <div class="card">
+      <h3 style="margin-top:0;">Space Blaster</h3>
+      <p class="muted">Blast the swooping alien ships with lasers. Spell English words right to earn rockets that go BOOM!</p>
+      <label class="muted" style="display:block;margin-bottom:0.2rem;">Choose your pilot</label>
+      <select id="shooter-sevling" ${won.length?'':'disabled'}>${shooterOptions}</select>
+      <button class="btn-primary btn-block" id="btn-play-shooter" ${hasTime?'':'disabled'}>Choose a list and play</button>
+    </div>
   `;
   document.getElementById('btn-play-c4').onclick = async ()=>{
     game.selectedConnect4Sevling = document.getElementById('c4-sevling').value || null;
@@ -2015,6 +2051,13 @@ function renderArcade(){
     await saveGame();
     state.racer = null; state.error = '';
     state.view = 'arcade-racer-setup'; render();
+  };
+  document.getElementById('btn-play-shooter').onclick = async ()=>{
+    getGameAudio();
+    game.selectedShooterSevling = document.getElementById('shooter-sevling').value || null;
+    await saveGame();
+    state.shooter = null; state.error = ''; state.shooterShowAll = false;
+    state.view = 'arcade-shooter-setup'; render();
   };
 }
 
@@ -2126,7 +2169,7 @@ function c4PlayerMove(col){
 
 // ---- Snake ----
 function newSnake(){
-  return { size:12, snake:[{x:6,y:6},{x:5,y:6},{x:4,y:6}], dir:{x:1,y:0}, nextDir:{x:1,y:0}, food:{x:9,y:6}, score:0, over:false, rewardGiven:false, wonItemName:null };
+  return { size:12, snake:[{x:6,y:6},{x:5,y:6},{x:4,y:6}], dir:{x:1,y:0}, dirQueue:[], food:{x:9,y:6}, score:0, over:false, rewardGiven:false, wonItemName:null };
 }
 function snakeRandomFood(s){
   let pos;
@@ -2136,7 +2179,7 @@ function snakeRandomFood(s){
 }
 function snakeTick(s){
   if(s.over) return;
-  s.dir = s.nextDir;
+  if(s.dirQueue.length) s.dir = s.dirQueue.shift();
   const head = { x: s.snake[0].x + s.dir.x, y: s.snake[0].y + s.dir.y };
   if(head.x<0||head.x>=s.size||head.y<0||head.y>=s.size || s.snake.some(seg=>seg.x===head.x&&seg.y===head.y)){
     s.over = true; return;
@@ -2145,27 +2188,53 @@ function snakeTick(s){
   if(head.x===s.food.x && head.y===s.food.y){ s.score++; s.food = snakeRandomFood(s); }
   else s.snake.pop();
 }
+// Turns are queued (up to 3), so two quick taps such as "up then left" both happen on
+// consecutive moves instead of the second overwriting the first.
 function snakeSetDir(s,dx,dy){
   if(!s || s.over) return;
-  if(s.dir.x===-dx && s.dir.y===-dy) return;
-  s.nextDir = {x:dx,y:dy};
+  const last = s.dirQueue.length ? s.dirQueue[s.dirQueue.length-1] : s.dir;
+  if((last.x===dx && last.y===dy) || (last.x===-dx && last.y===-dy)) return;
+  if(s.dirQueue.length < 3) s.dirQueue.push({x:dx,y:dy});
+}
+function snakeBoardHtml(s, headSevling){
+  const cellPct = 100/s.size;
+  let cellsHtml = '';
+  s.snake.forEach((seg, i)=>{
+    const style = `position:absolute;left:${seg.x*cellPct}%;top:${seg.y*cellPct}%;width:${cellPct}%;height:${cellPct}%;box-sizing:border-box;padding:1px;${i===0?'z-index:2;':''}`;
+    if(i===0){
+      const headInner = headSevling ? sevlingIcon(headSevling,false,true) : `<div style="width:100%;height:100%;background:var(--correct);border-radius:4px;"></div>`;
+      cellsHtml += `<div style="${style}"><div style="position:absolute;left:50%;top:50%;width:145%;height:145%;transform:translate(-50%,-50%);border-radius:50%;border:3px solid var(--correct);overflow:hidden;box-sizing:border-box;background:#fff;">${headInner}</div></div>`;
+    }else{
+      cellsHtml += `<div style="${style}"><div style="width:100%;height:100%;background:var(--correct);opacity:0.7;border-radius:3px;"></div></div>`;
+    }
+  });
+  cellsHtml += `<div style="position:absolute;left:${s.food.x*cellPct}%;top:${s.food.y*cellPct}%;width:${cellPct}%;height:${cellPct}%;display:flex;align-items:center;justify-content:center;font-size:clamp(14px,4.5vmin,34px);">🍎</div>`;
+  return cellsHtml;
+}
+// Each move only redraws the board itself, so the arrow buttons are never replaced
+// mid-tap (rebuilding the whole screen every move was what made taps go missing).
+function updateSnakeBoard(){
+  const s = state.snake;
+  const board = document.getElementById('snake-board');
+  if(!s || !board) return;
+  const headSevling = game.selectedSnakeSevling ? SEVLINGS.find(x=>x.id===game.selectedSnakeSevling) : null;
+  board.innerHTML = snakeBoardHtml(s, headSevling);
+  setTextIfChanged('snake-score', String(s.score));
 }
 function startSnakeLoop(){
   if(snakeLoopInterval) return;
   snakeLoopInterval = setInterval(()=>{
     const s = state.snake;
-    if(!s || s.over){
-      clearInterval(snakeLoopInterval); snakeLoopInterval = null;
-      render();
-      return;
-    }
+    if(state.view!=='arcade-snake' || !s){ clearInterval(snakeLoopInterval); snakeLoopInterval = null; return; }
+    if(s.over){ clearInterval(snakeLoopInterval); snakeLoopInterval = null; render(); return; }
     snakeTick(s);
+    if(s.over){ clearInterval(snakeLoopInterval); snakeLoopInterval = null; render(); return; }
     if(s.score>=10 && !s.rewardGiven){
       s.rewardGiven = true;
       const sevlingId = game.selectedSnakeSevling;
-      if(sevlingId) awardSevlingItem(sevlingId).then(itemName=>{ s.wonItemName = itemName; render(); });
+      if(sevlingId) awardSevlingItem(sevlingId).then(itemName=>{ s.wonItemName = itemName; if(state.view==='arcade-snake' && state.snake===s) render(); });
     }
-    render();
+    updateSnakeBoard();
   }, 190);
 }
 function renderSnakeGame(){
@@ -2174,53 +2243,48 @@ function renderSnakeGame(){
   const headId = game.selectedSnakeSevling;
   const headSevling = headId ? SEVLINGS.find(x=>x.id===headId) : null;
   const hasTime = (game.arcadeMs||0) > 0;
-  const cellPct = 100/s.size;
-  let cellsHtml = '';
-  for(let y=0;y<s.size;y++){
-    for(let x=0;x<s.size;x++){
-      const segIdx = s.snake.findIndex(seg=>seg.x===x&&seg.y===y);
-      const isFood = s.food.x===x && s.food.y===y;
-      let content = '';
-      const style = `position:absolute;left:${x*cellPct}%;top:${y*cellPct}%;width:${cellPct}%;height:${cellPct}%;box-sizing:border-box;padding:1px;`;
-      if(segIdx===0){
-        const headInner = headSevling ? sevlingIcon(headSevling,false,true) : `<div style="width:100%;height:100%;background:var(--correct);border-radius:4px;"></div>`;
-        content = `<div style="position:absolute;left:50%;top:50%;width:145%;height:145%;transform:translate(-50%,-50%);border-radius:50%;border:3px solid var(--correct);overflow:hidden;box-sizing:border-box;background:#fff;z-index:2;">${headInner}</div>`;
-      }else if(segIdx>-1){
-        content = `<div style="width:100%;height:100%;background:var(--correct);opacity:0.7;border-radius:3px;"></div>`;
-      }else if(isFood){
-        content = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:14px;">\uD83C\uDF4E</div>`;
-      }
-      cellsHtml += `<div style="${style}">${content}</div>`;
-    }
-  }
+  const arrow = (id, label, ch)=>`<button class="btn-secondary snake-btn" id="${id}" aria-label="${label}">${ch}</button>`;
   app.innerHTML = `
-    <button class="btn-ghost" id="btn-back-arcade">\u2190 Back to Arcade</button>
+    <button class="btn-ghost" id="btn-back-arcade">← Back to Arcade</button>
     <h2 class="section-title">Snake</h2>
-    <p class="progress" style="text-align:center;">Score: ${s.score} &nbsp;\u00B7&nbsp; Arcade time left: <span id="arcade-timer">${formatMs(game.arcadeMs||0)}</span></p>
-    ${s.wonItemName ? `<div class="card reward-card" style="border-top-color:var(--gold);"><p class="muted" style="text-align:center;margin:0;">\uD83C\uDF81 You won ${escapeHtml(s.wonItemName)} for ${escapeHtml(headSevling?headSevling.name:'your Sevling')}! Happiness +15</p></div>` : ''}
+    <p class="progress" style="text-align:center;">Score: <span id="snake-score">${s.score}</span> &nbsp;·&nbsp; Arcade time left: <span id="arcade-timer">${formatMs(game.arcadeMs||0)}</span></p>
+    ${s.wonItemName ? `<div class="card reward-card" style="border-top-color:var(--gold);"><p class="muted" style="text-align:center;margin:0;">🎁 You won ${escapeHtml(s.wonItemName)} for ${escapeHtml(headSevling?headSevling.name:'your Sevling')}! Happiness +15</p></div>` : ''}
     ${(s.over) ? `<div class="card"><p class="muted" style="text-align:center;margin:0;">Game over! Final score: ${s.score}</p></div>` : ''}
     ${(!hasTime) ? `<div class="card"><p class="muted" style="text-align:center;font-size:0.85rem;margin:0;">${s.over ? 'Out of arcade time, score 90%+ three times on a list to earn more!' : 'Your arcade time has run out, but you can finish this game.'}</p></div>` : ''}
-    <div class="card" style="padding:0.5rem;">
-      <div style="width:100%;max-width:560px;margin:0 auto;position:relative;">
-        <div style="padding-bottom:100%;"></div>
-        <div style="position:absolute;top:0;left:0;right:0;bottom:0;background:var(--bg);border:2px solid var(--ink);border-radius:12px;overflow:hidden;">${cellsHtml}</div>
-      </div>
+    <div class="snake-wrap">
+      <div id="snake-board" class="snake-board" aria-label="Snake board, swipe to steer">${snakeBoardHtml(s, headSevling)}</div>
     </div>
-    <div style="max-width:260px;margin:1rem auto 0;display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem;">
-      <div></div><button class="btn-secondary" id="snake-up" style="font-size:1.6rem;padding:1.1rem 0;">\u2191</button><div></div>
-      <button class="btn-secondary" id="snake-left" style="font-size:1.6rem;padding:1.1rem 0;">\u2190</button><div></div><button class="btn-secondary" id="snake-right" style="font-size:1.6rem;padding:1.1rem 0;">\u2192</button>
-      <div></div><button class="btn-secondary" id="snake-down" style="font-size:1.6rem;padding:1.1rem 0;">\u2193</button><div></div>
+    <div class="snake-pad">
+      <div></div>${arrow('snake-up','Up','↑')}<div></div>
+      ${arrow('snake-left','Left','←')}<div></div>${arrow('snake-right','Right','→')}
+      <div></div>${arrow('snake-down','Down','↓')}<div></div>
     </div>
+    <p class="muted" style="text-align:center;margin:0.5rem 0 0;">Tap the arrows or swipe on the board to steer.</p>
     <div class="btn-row" style="margin-top:1rem;justify-content:center;">
       <button class="btn-secondary" id="btn-snake-restart" ${hasTime?'':'disabled'}>New game</button>
     </div>
   `;
   document.getElementById('btn-back-arcade').onclick = ()=>{ stopAllArcadeIntervals(); state.view='arcade'; render(); };
   document.getElementById('btn-snake-restart').onclick = ()=>{ if((game.arcadeMs||0)<=0) return; stopAllArcadeIntervals(); state.snake = newSnake(); render(); };
-  document.getElementById('snake-up').onclick = ()=>snakeSetDir(state.snake,0,-1);
-  document.getElementById('snake-down').onclick = ()=>snakeSetDir(state.snake,0,1);
-  document.getElementById('snake-left').onclick = ()=>snakeSetDir(state.snake,-1,0);
-  document.getElementById('snake-right').onclick = ()=>snakeSetDir(state.snake,1,0);
+  // Arrow buttons respond the moment a finger touches them (pointerdown), not on release.
+  [['snake-up',0,-1],['snake-down',0,1],['snake-left',-1,0],['snake-right',1,0]].forEach(([id,dx,dy])=>{
+    const b = document.getElementById(id);
+    b.onpointerdown = (e)=>{ e.preventDefault(); snakeSetDir(state.snake,dx,dy); };
+    b.onclick = (e)=>e.preventDefault();
+    b.oncontextmenu = (e)=>e.preventDefault();
+  });
+  // Swipe anywhere on the board; a long drag can make several turns in one go.
+  const board = document.getElementById('snake-board');
+  let sx = null, sy = null;
+  board.onpointerdown = (e)=>{ e.preventDefault(); try{ board.setPointerCapture(e.pointerId); }catch(_){} sx = e.clientX; sy = e.clientY; };
+  board.onpointermove = (e)=>{
+    if(sx===null) return;
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    if(Math.max(Math.abs(dx), Math.abs(dy)) < 22) return;
+    if(Math.abs(dx) > Math.abs(dy)) snakeSetDir(state.snake, dx>0?1:-1, 0); else snakeSetDir(state.snake, 0, dy>0?1:-1);
+    sx = e.clientX; sy = e.clientY;
+  };
+  board.onpointerup = board.onpointercancel = board.onlostpointercapture = ()=>{ sx = null; sy = null; };
   if(!s.over){
     startSnakeLoop();
     if(hasTime) startArcadeCountdown(()=>render());
@@ -2404,6 +2468,7 @@ function adoptPersistentCanvas(id){
 }
 function invalidateGameImageCaches(){
   bbBgCanvas = null;
+  spBgCanvas = null;
   if(racerTrackCache) racerTrackCache.image = null;
 }
 function watchCanvasLoss(c){
@@ -2555,17 +2620,70 @@ function sfxStarChime(){
   });
 }
 
+// Space Blaster: a light, quick "pew" each time a laser fires.
+let lastLaserSfxAt = 0;
+function sfxLaser(){
+  const ctx = getGameAudio();
+  if(!ctx || ctx.state!=='running') return;
+  const now = ctx.currentTime;
+  if(now - lastLaserSfxAt < 0.06) return;
+  lastLaserSfxAt = now;
+  const osc = ctx.createOscillator(), gain = ctx.createGain();
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(1500, now);
+  osc.frequency.exponentialRampToValueAtTime(520, now + 0.09);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.05, now + 0.008);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.11);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(now); osc.stop(now + 0.12);
+}
+// Space Blaster: a big "boom" when a rocket explodes (filtered noise rumble plus a falling thump).
+// Also used, quieter, when the player's ship is hit.
+let boomNoiseBuffer = null;
+function sfxBoom(volume){
+  const ctx = getGameAudio();
+  if(!ctx || ctx.state!=='running') return;
+  const vol = volume==null ? 1 : volume;
+  const now = ctx.currentTime;
+  if(!boomNoiseBuffer || boomNoiseBuffer.sampleRate!==ctx.sampleRate){
+    const len = Math.floor(ctx.sampleRate*0.9);
+    boomNoiseBuffer = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = boomNoiseBuffer.getChannelData(0);
+    for(let i=0;i<len;i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/len, 1.6);
+  }
+  const noise = ctx.createBufferSource(); noise.buffer = boomNoiseBuffer;
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(1600, now); lp.frequency.exponentialRampToValueAtTime(120, now + 0.7);
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.0001, now); ng.gain.exponentialRampToValueAtTime(0.55*vol, now + 0.01); ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.85);
+  noise.connect(lp).connect(ng).connect(ctx.destination);
+  noise.start(now); noise.stop(now + 0.9);
+  const thump = ctx.createOscillator(), tg = ctx.createGain();
+  thump.type = 'sine';
+  thump.frequency.setValueAtTime(130, now); thump.frequency.exponentialRampToValueAtTime(38, now + 0.5);
+  tg.gain.setValueAtTime(0.0001, now); tg.gain.exponentialRampToValueAtTime(0.5*vol, now + 0.01); tg.gain.exponentialRampToValueAtTime(0.0001, now + 0.6);
+  thump.connect(tg).connect(ctx.destination);
+  thump.start(now); thump.stop(now + 0.65);
+}
+
 // Keyboard support for the two canvas games (touch controls are the main input, this is
 // a bonus for laptops). Ignored whenever a text box has focus, so typing a spelling works.
 const heldKeys = {};
 window.addEventListener('keydown', (e)=>{
   const tag = (e.target && e.target.tagName) || '';
   if(tag==='INPUT' || tag==='TEXTAREA' || tag==='SELECT') return;
-  if(state.view!=='arcade-brick' && state.view!=='arcade-racer') return;
+  if(state.view==='arcade-snake' && state.snake){
+    const d = { ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0] }[e.key];
+    if(d){ e.preventDefault(); snakeSetDir(state.snake, d[0], d[1]); }
+    return;
+  }
+  if(state.view!=='arcade-brick' && state.view!=='arcade-racer' && state.view!=='arcade-shooter') return;
   if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(e.key)){
     e.preventDefault();
     heldKeys[e.key] = true;
     if(e.key===' ' && state.view==='arcade-brick') bbLaunch();
+    if(e.key==='ArrowUp' && state.view==='arcade-shooter' && !e.repeat) spFireRocket(); // space fires lasers, up arrow fires a rocket
   }
 });
 window.addEventListener('keyup', (e)=>{ heldKeys[e.key] = false; });
@@ -3545,6 +3663,653 @@ function renderRacer(){
   if(!finished){
     startArcadeRaf(racerLoopStep);
     if(hasTime && !r.prompt) startArcadeCountdown(()=>render());
+  }else{
+    stopAllArcadeIntervals();
+  }
+}
+
+// ---- Space Blaster (Galaga-style shooter) ----
+// The player's ship sits at the bottom and fires lasers up at waves of alien ships that fly in
+// on looping paths, settle into a formation and then take turns swooping down. Every 20 seconds
+// of play a spelling from the chosen English list pops up; a correct answer earns one rocket,
+// which explodes on impact with a much bigger blast radius than a laser ("BOOM!").
+// Forgiving by default: 5 lives, slow enemy shots that only diving aliens fire, a small player
+// hitbox and a few seconds of invulnerability after each lost life.
+const SP_W = 480, SP_H = 600;
+const SP_LIVES = 5;
+const SP_SKY = '#07051A';      // near-black space background
+const SP_PROMPT_EVERY = 20;       // seconds of play between spelling questions
+const SP_REWARD_KILLS = 30;       // aliens blasted in one game for the Sevling's free item
+const SP_LASER_COOLDOWN = 0.28;
+const SP_MAX_BOLTS = 4;
+const SP_ROCKET_RADIUS = 95;      // blast radius of a rocket (a laser only hits what it touches)
+const SP_ENEMY_SHOT_SPEED = 165;
+const SP_COL_X = (col)=>SP_W/2 + (col-3.5)*52;
+const SP_ROW_Y = (row)=>80 + row*48;
+const SP_ALIEN_TYPES = {
+  boss:      { hp:2, r:22, score:150, colour:FOIL.pink },
+  butterfly: { hp:1, r:20, score:80,  colour:FOIL.blue },
+  bee:       { hp:1, r:19, score:50,  colour:FOIL.gold }
+};
+function spWaveMul(wave){ return Math.min(1.35, 1 + 0.06*(wave-1)); }
+function spSlotPos(s, a){ return { x: SP_COL_X(a.col) + Math.sin(s.time*0.7)*18, y: SP_ROW_Y(a.row) + Math.sin(s.time*1.4 + a.col*0.5)*3 }; }
+// Entry paths: a group swoops in from the top or the side, does a full loop, then heads for its slots.
+function spEntryPath(kind, fromLeft){
+  const m = fromLeft ? 1 : -1, cx0 = fromLeft ? 0 : SP_W;
+  const pts = [];
+  const loop = (cx, cy, r, startAng, turns, dir)=>{ for(let k=0;k<=16*turns;k++){ const a = startAng + dir*k*(Math.PI*2/16); pts.push({ x:cx + Math.cos(a)*r, y:cy + Math.sin(a)*r }); } };
+  if(kind===0){
+    // From the top, curving down the side of the screen and looping round
+    pts.push({ x: SP_W/2 - m*40, y:-30 }, { x: cx0 + m*150, y:120 }, { x: cx0 + m*110, y:250 });
+    loop(cx0 + m*170, 300, 65, fromLeft ? Math.PI : 0, 1, fromLeft ? -1 : 1);
+  }else{
+    // From the side, low across the screen, then a loop and up to the formation
+    pts.push({ x: cx0 - m*30, y:430 }, { x: cx0 + m*140, y:400 }, { x: cx0 + m*230, y:340 });
+    loop(cx0 + m*230, 270, 70, Math.PI/2, 1, fromLeft ? -1 : 1);
+  }
+  return pts;
+}
+function spBuildWave(s){
+  const aliens = [];
+  const add = (type, row, col)=>{ const t = SP_ALIEN_TYPES[type]; aliens.push({ type, row, col, hp:t.hp, r:t.r, x:-100, y:-100, vx:0, vy:1, state:'waiting', enterAt:0, wps:[], wpi:0, flap:Math.random()*6, shot:false, dead:false }); };
+  for(let c=2;c<=5;c++) add('boss', 0, c);
+  for(let c=0;c<8;c++) add('butterfly', 1, c);
+  for(let c=0;c<8;c++) add('bee', 2, c);
+  if(s.wave>=2) for(let c=1;c<7;c++) add('bee', 3, c);
+  // Fly in by groups of four, alternating sides and path shapes, each group nose-to-tail.
+  const order = shuffle(aliens.map((_,i)=>i));
+  const groups = [];
+  for(let i=0;i<order.length;i+=4) groups.push(order.slice(i,i+4));
+  groups.forEach((g,gi)=>{
+    const fromLeft = gi%2===0, kind = Math.floor(gi/2)%2;
+    const path = spEntryPath(kind, fromLeft);
+    g.forEach((ai,k)=>{
+      const a = aliens[ai];
+      a.enterAt = s.time + 0.8 + gi*1.5 + k*0.24;
+      a.wps = path.map(p=>({x:p.x, y:p.y}));
+      a.x = path[0].x; a.y = path[0].y;
+    });
+  });
+  s.aliens = aliens;
+  s.diveTimer = 2.5;
+}
+function newShooter(pool){
+  const s = {
+    pool: shuffle(pool), poolIdx:0, prompt:null, questions:0, correct:0,
+    time:0, wave:1, score:0, kills:0, lives:SP_LIVES, rockets:0,
+    player:{ x:SP_W/2, y:SP_H-54, targetX:SP_W/2, cooldown:0, dead:false, respawnT:0, invuln:2 },
+    firing:false, bolts:[], rocketsInFlight:[], enemyShots:[], particles:[], booms:[], aliens:[],
+    stars: Array.from({length:46}, ()=>({ x:Math.random()*SP_W, y:Math.random()*SP_H, sp:12+Math.random()*34, size:1.5+Math.random()*3, tw:Math.random()*6, col: Math.random()<0.7 ? '#FFFFFF' : [FOIL.pink,FOIL.blue,FOIL.gold,FOIL.lime][Math.floor(Math.random()*4)] })),
+    sincePrompt:0, diveTimer:2.5, waveClearT:0, overT:0, over:false,
+    banner:'Wave 1', bannerUntil:2, rewardGiven:false, wonItemName:null, needsRender:false
+  };
+  spBuildWave(s);
+  return s;
+}
+function spBurst(s, x, y, colour, n, speed){
+  for(let i=0;i<n;i++){
+    const a = Math.random()*Math.PI*2, v = speed*(0.4+Math.random()*0.8);
+    s.particles.push({ x, y, vx:Math.cos(a)*v, vy:Math.sin(a)*v, life:0.5+Math.random()*0.4, max:0.9, size:3+Math.random()*4, col: Math.random()<0.5 ? colour : [FOIL.pink,FOIL.blue,FOIL.gold,FOIL.lime][Math.floor(Math.random()*4)] });
+  }
+}
+function spKill(s, a){
+  if(a.dead) return;
+  a.dead = true;
+  s.kills++;
+  s.score += SP_ALIEN_TYPES[a.type].score * (a.state==='diving' ? 2 : 1);
+  spBurst(s, a.x, a.y, SP_ALIEN_TYPES[a.type].colour, 12, 150);
+  if(s.kills>=SP_REWARD_KILLS && !s.rewardGiven){
+    s.rewardGiven = true;
+    const sevlingId = game.selectedShooterSevling;
+    if(sevlingId) awardSevlingItem(sevlingId).then(itemName=>{ s.wonItemName = itemName; if(state.view==='arcade-shooter' && state.shooter===s) render(); });
+  }
+}
+function spHitAlien(s, a){
+  a.hp--;
+  if(a.hp<=0) spKill(s, a);
+  else spBurst(s, a.x, a.y, FOIL.white, 5, 90);
+}
+function spExplodeRocket(s, x, y){
+  s.booms.push({ x, y, t:0 });
+  sfxBoom();
+  s.aliens.forEach(a=>{ if(!a.dead && a.state!=='waiting' && Math.hypot(a.x-x, a.y-y) < SP_ROCKET_RADIUS + a.r) spKill(s, a); });
+  s.enemyShots = s.enemyShots.filter(b=>Math.hypot(b.x-x, b.y-y) > SP_ROCKET_RADIUS);
+  spBurst(s, x, y, FOIL.gold, 36, 260);
+}
+function spFireRocket(){
+  const s = state.shooter;
+  if(!s || s.over || s.prompt || s.player.dead || s.rockets<=0) return;
+  s.rockets--;
+  s.rocketsInFlight.push({ x:s.player.x, y:s.player.y-34, vx:0, vy:-120 });
+  setTextIfChanged('sp-rockets', String(s.rockets));
+  const btn = document.getElementById('btn-sp-rocket');
+  if(btn){ btn.disabled = s.rockets<=0; btn.querySelector('.sp-rocket-count').textContent = s.rockets; }
+}
+function spStartDive(s){
+  const ready = s.aliens.filter(a=>!a.dead && a.state==='formation');
+  if(!ready.length) return;
+  const diving = s.aliens.filter(a=>!a.dead && (a.state==='diving' || a.state==='returning')).length;
+  if(diving >= Math.min(3, 1 + Math.floor(s.wave/2))) return;
+  // Prefer the lower rows, like the classic game.
+  const weighted = ready.flatMap(a=>Array(a.row+1).fill(a));
+  const a = weighted[Math.floor(Math.random()*weighted.length)];
+  const side = a.x < SP_W/2 ? -1 : 1, px = s.player.x;
+  a.state = 'diving'; a.shot = false; a.wpi = 0;
+  a.wps = [
+    { x:a.x + side*30, y:a.y - 34 }, { x:a.x + side*62, y:a.y - 8 }, { x:a.x + side*48, y:a.y + 40 },
+    { x:Math.max(40, Math.min(SP_W-40, px - side*70)), y:SP_H*0.5 },
+    { x:Math.max(30, Math.min(SP_W-30, px + side*50)), y:SP_H*0.76 },
+    { x:Math.max(30, Math.min(SP_W-30, px + side*90)), y:SP_H + 40 }
+  ];
+}
+function spMoveAlong(a, target, speed, dt){
+  const dx = target.x - a.x, dy = target.y - a.y, d = Math.hypot(dx, dy);
+  const step = speed*dt;
+  if(d <= step || d < 0.001){ a.x = target.x; a.y = target.y; return true; }
+  const nvx = dx/d, nvy = dy/d;
+  // ease the heading so the sprite turns smoothly
+  a.vx += (nvx - a.vx)*Math.min(1, dt*10); a.vy += (nvy - a.vy)*Math.min(1, dt*10);
+  a.x += nvx*step; a.y += nvy*step;
+  return d - step < 8;
+}
+function spStep(s, dt){
+  if(s.prompt) return;
+  s.time += dt;
+  const mul = spWaveMul(s.wave);
+  const p = s.player;
+  // Background sparkles drift down for a sense of flying
+  s.stars.forEach(st=>{ st.y += st.sp*dt; if(st.y > SP_H+6){ st.y = -6; st.x = Math.random()*SP_W; } });
+  // Particles and blast rings
+  s.particles.forEach(q=>{ q.x += q.vx*dt; q.y += q.vy*dt; q.vx *= 0.96; q.vy *= 0.96; q.life -= dt; });
+  s.particles = s.particles.filter(q=>q.life>0);
+  s.booms.forEach(b=>b.t += dt);
+  s.booms = s.booms.filter(b=>b.t < 1.1);
+  if(s.over) return;
+  if(s.overT>0){ s.overT -= dt; if(s.overT<=0){ s.over = true; s.needsRender = true; } return; }
+
+  // Player: follows the finger (or slides with the arrow keys) and auto-fires while held
+  if(!p.dead){
+    const keyDir = (heldKeys['ArrowRight']?1:0) - (heldKeys['ArrowLeft']?1:0);
+    if(keyDir){ p.targetX = p.x + keyDir*40; }
+    p.x += (p.targetX - p.x) * Math.min(1, dt*(keyDir ? 8 : 14));
+    p.x = Math.max(30, Math.min(SP_W-30, p.x));
+    if(p.invuln>0) p.invuln -= dt;
+    p.cooldown -= dt;
+    if((s.firing || heldKeys[' ']) && p.cooldown<=0 && s.bolts.length < SP_MAX_BOLTS){
+      p.cooldown = SP_LASER_COOLDOWN;
+      s.bolts.push({ x:p.x, y:p.y-32 });
+      sfxLaser();
+    }
+  }else{
+    p.respawnT -= dt;
+    if(p.respawnT<=0){ p.dead = false; p.invuln = 2.5; p.x = SP_W/2; p.targetX = SP_W/2; }
+  }
+
+  // Lasers
+  s.bolts.forEach(b=>{
+    b.y -= 560*dt;
+    for(const a of s.aliens){
+      if(a.dead || a.state==='waiting') continue;
+      if(Math.abs(b.x-a.x) < a.r && Math.abs(b.y-a.y) < a.r+6){ spHitAlien(s, a); b.dead = true; break; }
+    }
+    if(b.y < -20) b.dead = true;
+  });
+  s.bolts = s.bolts.filter(b=>!b.dead);
+  // Rockets: start slow, then accelerate, and explode on the first alien they touch (or at the top)
+  s.rocketsInFlight.forEach(r=>{
+    r.vy = Math.max(-480, r.vy - 700*dt);
+    // Gently steers towards the nearest alien ahead, so a rocket earned by spelling rarely misses.
+    let best = null, bestD = Infinity;
+    s.aliens.forEach(a=>{ if(a.dead || a.state==='waiting' || a.y > r.y - 10) return; const d = Math.hypot(a.x-r.x, a.y-r.y); if(d < bestD){ bestD = d; best = a; } });
+    const wantVx = best ? Math.max(-260, Math.min(260, (best.x - r.x)*3)) : 0;
+    r.vx += (wantVx - r.vx)*Math.min(1, dt*5);
+    r.x += r.vx*dt; r.y += r.vy*dt;
+    s.particles.push({ x:r.x + (Math.random()-0.5)*6, y:r.y+16, vx:(Math.random()-0.5)*30, vy:60+Math.random()*40, life:0.35, max:0.35, size:3+Math.random()*3, col: Math.random()<0.5 ? FOIL.gold : FOIL.pink });
+    const hit = s.aliens.find(a=>!a.dead && a.state!=='waiting' && Math.hypot(a.x-r.x, a.y-r.y) < a.r + 8);
+    if(hit || r.y < 40){ r.dead = true; spExplodeRocket(s, r.x, hit ? hit.y : r.y); }
+  });
+  s.rocketsInFlight = s.rocketsInFlight.filter(r=>!r.dead);
+
+  // Aliens
+  s.aliens.forEach(a=>{
+    if(a.dead) return;
+    a.flap += dt*9;
+    if(a.state==='waiting'){ if(s.time >= a.enterAt){ a.state = 'entering'; a.wpi = 0; } return; }
+    if(a.state==='formation'){ const sp = spSlotPos(s, a); a.x = sp.x; a.y = sp.y; a.vx += (0 - a.vx)*Math.min(1,dt*6); a.vy += (1 - a.vy)*Math.min(1,dt*6); return; }
+    const speed = (a.state==='diving' ? 205 : 240) * mul;
+    if(a.wpi < a.wps.length){
+      if(spMoveAlong(a, a.wps[a.wpi], speed, dt)) a.wpi++;
+    }else if(a.state==='diving'){
+      // Swooped off the bottom: come back in from the top to its slot
+      a.state = 'returning'; const sp = spSlotPos(s, a); a.x = sp.x; a.y = -30; a.wps = []; a.wpi = 0;
+    }else{
+      if(spMoveAlong(a, spSlotPos(s, a), speed*0.9, dt) && Math.hypot(a.x-spSlotPos(s,a).x, a.y-spSlotPos(s,a).y) < 3) a.state = 'formation';
+    }
+    // Diving aliens may drop one slow shot as they pass halfway down
+    if(a.state==='diving' && !a.shot && a.y > SP_H*0.36 && a.vy > 0){
+      a.shot = true;
+      if(Math.random() < 0.5 + Math.min(0.3, (s.wave-1)*0.08)){
+        const dx = p.x - a.x, dy = p.y - a.y, d = Math.hypot(dx,dy) || 1;
+        const vx = dx/d*SP_ENEMY_SHOT_SPEED*0.45, vy = SP_ENEMY_SHOT_SPEED;
+        s.enemyShots.push({ x:a.x, y:a.y+10, vx, vy });
+      }
+    }
+    // A diving alien that touches the ship
+    if(!p.dead && p.invuln<=0 && a.state==='diving' && Math.hypot(a.x-p.x, a.y-p.y) < a.r + 10){ spKill(s, a); spPlayerHit(s); }
+  });
+  // Swoops start once everyone has arrived
+  const arriving = s.aliens.some(a=>!a.dead && (a.state==='waiting' || a.state==='entering'));
+  if(!arriving && s.waveClearT<=0){
+    s.diveTimer -= dt;
+    if(s.diveTimer<=0){ spStartDive(s); s.diveTimer = Math.max(1.5, 3.2 - 0.25*(s.wave-1)) * (0.75 + Math.random()*0.5); }
+  }
+  // Enemy shots
+  s.enemyShots.forEach(b=>{
+    b.x += b.vx*dt; b.y += b.vy*dt;
+    if(!p.dead && p.invuln<=0 && Math.abs(b.x-p.x) < 12 && Math.abs(b.y-(p.y+2)) < 15){ b.dead = true; spPlayerHit(s); }
+    if(b.y > SP_H+10) b.dead = true;
+  });
+  s.enemyShots = s.enemyShots.filter(b=>!b.dead);
+
+  // Wave cleared
+  if(s.waveClearT>0){
+    s.waveClearT -= dt;
+    if(s.waveClearT<=0){ s.wave++; spBuildWave(s); s.banner = `Wave ${s.wave}`; s.bannerUntil = s.time + 2; }
+  }else if(s.aliens.every(a=>a.dead)){
+    s.waveClearT = 2.2; s.enemyShots = [];
+    s.banner = 'Wave cleared! 🎉'; s.bannerUntil = s.time + 2;
+  }
+
+  // Spelling question every 20 seconds of play (only while the ship is flying)
+  if(s.pool.length && !p.dead){
+    s.sincePrompt += dt;
+    if(s.sincePrompt >= SP_PROMPT_EVERY) spOpenPrompt(s);
+  }
+}
+function spPlayerHit(s){
+  const p = s.player;
+  if(p.dead) return;
+  p.dead = true; p.respawnT = 1.5;
+  s.lives--; s.firing = false;
+  spBurst(s, p.x, p.y, FOIL.pink, 26, 200);
+  sfxBoom(0.45);
+  if(s.lives<=0){ s.overT = 1.3; }
+  else { s.banner = `Ouch! ${s.lives} ${s.lives===1?'life':'lives'} left`; s.bannerUntil = s.time + 2; }
+}
+// ---- Space Blaster drawing ----
+let spBgCanvas = null;
+function spBackground(dpr){
+  if(spBgCanvas && spBgCanvas._dpr===dpr && !(blankCheckDue() && canvasLooksBlank(spBgCanvas))) return spBgCanvas;
+  const c = document.createElement('canvas');
+  c.width = SP_W*dpr; c.height = SP_H*dpr; c._dpr = dpr;
+  const x = c.getContext('2d'); x.scale(dpr, dpr);
+  // Deep space: near-black with faint holographic nebula glows and a field of tiny fixed stars.
+  x.fillStyle = SP_SKY; x.fillRect(0,0,SP_W,SP_H);
+  [[0.18,0.2,FOIL.pink,0.5],[0.85,0.35,FOIL.blue,0.55],[0.3,0.82,'#7B4DFF',0.5],[0.8,0.88,FOIL.pink,0.35]].forEach(([px,py,col,rad])=>{
+    const g = x.createRadialGradient(px*SP_W, py*SP_H, 0, px*SP_W, py*SP_H, SP_W*rad);
+    g.addColorStop(0, col+'2A'); g.addColorStop(1, col+'00');
+    x.fillStyle = g; x.fillRect(0,0,SP_W,SP_H);
+  });
+  let seed = 7;
+  const rnd = ()=>{ seed = (seed*16807) % 2147483647; return seed/2147483647; };
+  for(let i=0;i<170;i++){
+    const r = rnd()<0.85 ? 0.6 + rnd()*0.7 : 1.3 + rnd()*0.6;
+    x.globalAlpha = 0.35 + rnd()*0.6;
+    x.fillStyle = rnd()<0.85 ? '#FFFFFF' : [FOIL.blue,FOIL.gold,FOIL.pink][Math.floor(rnd()*3)];
+    x.beginPath(); x.arc(rnd()*SP_W, rnd()*SP_H, r, 0, Math.PI*2); x.fill();
+  }
+  x.globalAlpha = 1;
+  watchCanvasLoss(c);
+  spBgCanvas = c;
+  return c;
+}
+function spSparkle(ctx, x, y, r, col){
+  ctx.fillStyle = col;
+  ctx.beginPath();
+  ctx.moveTo(x, y-r); ctx.quadraticCurveTo(x, y, x+r, y); ctx.quadraticCurveTo(x, y, x, y+r); ctx.quadraticCurveTo(x, y, x-r, y); ctx.quadraticCurveTo(x, y, x, y-r);
+  ctx.fill();
+}
+function spDrawAlien(ctx, s, a){
+  const t = SP_ALIEN_TYPES[a.type];
+  const rot = Math.atan2(a.vy, a.vx) - Math.PI/2;
+  const flap = 0.75 + 0.25*Math.sin(a.flap);
+  ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(rot); ctx.scale(1.25, 1.25);
+  const ink = FOIL.ink;
+  const body = (dx, dy, col)=>{
+    ctx.save(); ctx.translate(dx, dy);
+    if(a.type==='bee'){
+      // round gold bug with stripes, flapping wings and antennae
+      ctx.fillStyle = col===ink ? ink : FOIL.white;
+      [-1,1].forEach(sd=>{ ctx.beginPath(); ctx.ellipse(sd*11, -6, 9, 6*flap, sd*0.5, 0, Math.PI*2); ctx.fill(); if(col!==ink){ ctx.lineWidth=2; ctx.strokeStyle=ink; ctx.stroke(); } });
+      ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(0, 0, 10, 13, 0, 0, Math.PI*2); ctx.fill();
+      if(col!==ink){
+        ctx.lineWidth = 2; ctx.strokeStyle = ink; ctx.stroke();
+        ctx.fillStyle = ink; ctx.fillRect(-9, -3, 18, 3); ctx.fillRect(-8, 3, 16, 3);
+        ctx.beginPath(); ctx.moveTo(-4,11); ctx.lineTo(-7,17); ctx.moveTo(4,11); ctx.lineTo(7,17); ctx.stroke();
+        ctx.fillStyle = FOIL.white; ctx.beginPath(); ctx.arc(-4, 8, 2.4, 0, Math.PI*2); ctx.arc(4, 8, 2.4, 0, Math.PI*2); ctx.fill();
+      }
+    }else if(a.type==='butterfly'){
+      // blue butterfly-ship with pink wing tips
+      [-1,1].forEach(sd=>{
+        ctx.fillStyle = col===ink ? ink : FOIL.blue;
+        ctx.beginPath(); ctx.moveTo(0,-4); ctx.quadraticCurveTo(sd*20*flap, -18, sd*18*flap, 2); ctx.quadraticCurveTo(sd*16*flap, 14, 0, 6); ctx.closePath(); ctx.fill();
+        if(col!==ink){ ctx.lineWidth=2; ctx.strokeStyle=ink; ctx.stroke(); ctx.fillStyle = FOIL.pink; ctx.beginPath(); ctx.arc(sd*13*flap, -4, 3.2, 0, Math.PI*2); ctx.fill(); }
+      });
+      ctx.fillStyle = col===ink ? ink : FOIL.white; ctx.beginPath(); ctx.ellipse(0, 1, 5, 12, 0, 0, Math.PI*2); ctx.fill();
+      if(col!==ink){ ctx.lineWidth=2; ctx.strokeStyle=ink; ctx.stroke(); ctx.fillStyle = ink; ctx.beginPath(); ctx.arc(-2.2, 8, 1.8, 0, Math.PI*2); ctx.arc(2.2, 8, 1.8, 0, Math.PI*2); ctx.fill(); }
+    }else{
+      // boss: bigger pink ship with horns; turns holographic when it's taken a hit
+      const fill = col===ink ? ink : (a.hp < SP_ALIEN_TYPES.boss.hp ? holoGradient(ctx, -18, -18, 18, 18) : FOIL.pink);
+      ctx.fillStyle = fill;
+      ctx.beginPath(); ctx.moveTo(-16,-12); ctx.lineTo(-8,-4); ctx.lineTo(0,-14); ctx.lineTo(8,-4); ctx.lineTo(16,-12); ctx.lineTo(18, 6); ctx.quadraticCurveTo(0, 22, -18, 6); ctx.closePath(); ctx.fill();
+      if(col!==ink){
+        ctx.lineWidth = 2; ctx.strokeStyle = ink; ctx.stroke();
+        [-1,1].forEach(sd=>{ ctx.fillStyle = FOIL.white; ctx.beginPath(); ctx.ellipse(sd*24*flap, 2, 6, 9, 0, 0, Math.PI*2); ctx.fill(); ctx.stroke(); });
+        ctx.fillStyle = FOIL.white; ctx.beginPath(); ctx.arc(-6, 5, 4, 0, Math.PI*2); ctx.arc(6, 5, 4, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = ink; ctx.beginPath(); ctx.arc(-6, 6.5, 2, 0, Math.PI*2); ctx.arc(6, 6.5, 2, 0, Math.PI*2); ctx.fill();
+      }
+    }
+    ctx.restore();
+  };
+  body(2, 2, ink);          // hard ink sticker shadow
+  body(0, 0, t.colour);
+  ctx.restore();
+}
+function spDrawShip(ctx, p, time){
+  if(p.dead) return;
+  if(p.invuln>0 && Math.floor(time*10)%2===0) ctx.globalAlpha = 0.35;
+  ctx.save(); ctx.translate(p.x, p.y); ctx.scale(1.3, 1.3);
+  // thruster flame
+  const fl = 8 + Math.random()*6;
+  ctx.fillStyle = FOIL.gold; ctx.beginPath(); ctx.moveTo(-7,16); ctx.lineTo(0,16+fl); ctx.lineTo(7,16); ctx.fill();
+  ctx.fillStyle = FOIL.pink; ctx.beginPath(); ctx.moveTo(-4,16); ctx.lineTo(0,12+fl*0.7); ctx.lineTo(4,16); ctx.fill();
+  const shape = ()=>{ ctx.beginPath(); ctx.moveTo(0,-26); ctx.quadraticCurveTo(8,-14, 9,-2); ctx.lineTo(24,10); ctx.lineTo(22,18); ctx.lineTo(8,14); ctx.lineTo(-8,14); ctx.lineTo(-22,18); ctx.lineTo(-24,10); ctx.lineTo(-9,-2); ctx.quadraticCurveTo(-8,-14, 0,-26); ctx.closePath(); };
+  ctx.save(); ctx.translate(3,3); shape(); ctx.fillStyle = FOIL.ink; ctx.fill(); ctx.restore();
+  shape(); ctx.fillStyle = holoGradient(ctx, -24, -26, 24, 18); ctx.fill();
+  ctx.lineWidth = 2; ctx.strokeStyle = FOIL.ink; ctx.stroke();
+  // cockpit (the Sevling pilot's face sits on top of this)
+  ctx.fillStyle = FOIL.white; ctx.beginPath(); ctx.arc(0, -2, 9, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = FOIL.blue; ctx.beginPath(); ctx.arc(-2.5, -4.5, 2.5, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+function spDrawRocket(ctx, r){
+  ctx.save(); ctx.translate(r.x, r.y); ctx.rotate(Math.atan2(r.vx||0, -r.vy)); ctx.scale(1.3, 1.3);
+  const shape = ()=>{ ctx.beginPath(); ctx.moveTo(0,-16); ctx.quadraticCurveTo(7,-8, 6,10); ctx.lineTo(-6,10); ctx.quadraticCurveTo(-7,-8, 0,-16); ctx.closePath(); };
+  ctx.save(); ctx.translate(2,2); shape(); ctx.fillStyle = FOIL.ink; ctx.fill(); ctx.restore();
+  ctx.fillStyle = FOIL.pink; ctx.beginPath(); ctx.moveTo(-6,4); ctx.lineTo(-11,14); ctx.lineTo(-5,10); ctx.closePath(); ctx.moveTo(6,4); ctx.lineTo(11,14); ctx.lineTo(5,10); ctx.closePath(); ctx.fill();
+  shape(); ctx.fillStyle = FOIL.white; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = FOIL.ink; ctx.stroke();
+  ctx.fillStyle = FOIL.pink; ctx.beginPath(); ctx.moveTo(0,-16); ctx.quadraticCurveTo(5,-10, 5,-7); ctx.lineTo(-5,-7); ctx.quadraticCurveTo(-5,-10, 0,-16); ctx.fill();
+  ctx.fillStyle = FOIL.blue; ctx.beginPath(); ctx.arc(0, -1, 2.6, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+function spDraw(s){
+  const cv = prepCanvas('sp-canvas', SP_W, SP_H);
+  if(!cv) return;
+  const { ctx, dpr } = cv;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = SP_SKY; ctx.fillRect(0, 0, cv.c.width, cv.c.height);
+  ctx.drawImage(spBackground(dpr), 0, 0);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  // Drifting, twinkling star sparkles over the fixed starfield
+  s.stars.forEach(st=>{ ctx.globalAlpha = 0.45 + 0.45*Math.sin(s.time*3 + st.tw); spSparkle(ctx, st.x, st.y, st.size, st.col); });
+  ctx.globalAlpha = 1;
+  s.aliens.forEach(a=>{ if(!a.dead && a.state!=='waiting') spDrawAlien(ctx, s, a); });
+  // Enemy shots: glowing lime drops with a white core, easy to tell from the player's pink lasers
+  s.enemyShots.forEach(b=>{
+    ctx.fillStyle = 'rgba(196,255,61,0.28)'; ctx.beginPath(); ctx.arc(b.x, b.y, 9, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = FOIL.lime; ctx.beginPath(); ctx.ellipse(b.x, b.y, 4.5, 7, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = FOIL.white; ctx.beginPath(); ctx.arc(b.x, b.y-1, 2, 0, Math.PI*2); ctx.fill();
+  });
+  // Player lasers
+  s.bolts.forEach(b=>{
+    ctx.fillStyle = 'rgba(255,62,165,0.3)'; rrPath(ctx, b.x-6, b.y-12, 12, 24, 6); ctx.fill();
+    ctx.fillStyle = FOIL.pink; rrPath(ctx, b.x-3, b.y-9, 6, 18, 3); ctx.fill();
+    ctx.fillStyle = FOIL.white; rrPath(ctx, b.x-1, b.y-7, 2, 12, 1); ctx.fill();
+  });
+  s.rocketsInFlight.forEach(r=>spDrawRocket(ctx, r));
+  s.particles.forEach(q=>{ ctx.globalAlpha = Math.max(0, q.life/q.max); ctx.fillStyle = q.col; ctx.fillRect(q.x-q.size/2, q.y-q.size/2, q.size, q.size); });
+  ctx.globalAlpha = 1;
+  // Rocket blasts: an expanding shockwave ring plus a big "BOOM!" sticker
+  s.booms.forEach(b=>{
+    const k = Math.min(1, b.t/0.35);
+    ctx.globalAlpha = Math.max(0, 1 - b.t/0.7);
+    ctx.lineWidth = 6; ctx.strokeStyle = FOIL.gold; ctx.beginPath(); ctx.arc(b.x, b.y, SP_ROCKET_RADIUS*k, 0, Math.PI*2); ctx.stroke();
+    ctx.lineWidth = 2.5; ctx.strokeStyle = FOIL.ink; ctx.beginPath(); ctx.arc(b.x, b.y, SP_ROCKET_RADIUS*k + 4, 0, Math.PI*2); ctx.stroke();
+    ctx.globalAlpha = Math.max(0, Math.min(1, (1.1 - b.t)/0.3));
+    const pop = b.t < 0.15 ? 0.6 + b.t/0.15*0.55 : 1.15 - Math.min(0.15, (b.t-0.15)*0.6);
+    const ty = Math.max(40, b.y - 10 - b.t*30);
+    ctx.save(); ctx.translate(Math.max(125, Math.min(SP_W-125, b.x)), ty); ctx.scale(pop, pop); ctx.rotate(-0.08);
+    ctx.font = `800 46px 'Baloo 2', sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round'; ctx.lineWidth = 9; ctx.strokeStyle = FOIL.ink;
+    ctx.strokeText('BOOM!', 3, 3); ctx.fillStyle = FOIL.ink; ctx.fillText('BOOM!', 3, 3);
+    ctx.strokeText('BOOM!', 0, 0);
+    ctx.fillStyle = holoGradient(ctx, -70, -20, 70, 20); ctx.fillText('BOOM!', 0, 0);
+    ctx.restore();
+  });
+  ctx.globalAlpha = 1;
+  spDrawShip(ctx, s.player, s.time);
+  // Banner
+  if(s.time < s.bannerUntil && !s.over){
+    ctx.font = `700 20px 'Baloo 2', sans-serif`;
+    const w = Math.min(SP_W-40, ctx.measureText(s.banner).width + 34);
+    stickerRect(ctx, SP_W/2 - w/2, SP_H*0.5 - 19, w, 38, 19, FOIL.white, 3);
+    ctx.fillStyle = FOIL.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(s.banner, SP_W/2, SP_H*0.5+1);
+  }
+  // Pilot's face sits in the cockpit
+  const face = document.getElementById('sp-face');
+  if(face){
+    face.style.display = s.player.dead ? 'none' : '';
+    face.style.opacity = (s.player.invuln>0 && Math.floor(s.time*10)%2===0) ? '0.35' : '1';
+    face.style.left = (s.player.x/SP_W*100)+'%'; face.style.top = ((s.player.y-2.6)/SP_H*100)+'%';
+  }
+}
+function spLoopStep(dt){
+  const s = state.shooter;
+  if(state.view!=='arcade-shooter' || !s) return false;
+  spStep(s, dt);
+  spDraw(s);
+  setTextIfChanged('sp-wave', String(s.wave));
+  setTextIfChanged('sp-score', String(s.score));
+  setTextIfChanged('sp-lives', '❤️'.repeat(Math.max(0, s.lives)) || '0');
+  setTextIfChanged('sp-rockets', String(s.rockets));
+  if(s.needsRender){ s.needsRender = false; render(); }
+  return !s.over;
+}
+// ---- Space Blaster spelling questions (same flow as the racer's pit stops) ----
+let spRevealTimer = null;
+function clearShooterRevealTimer(){ if(spRevealTimer){ clearTimeout(spRevealTimer); spRevealTimer = null; } }
+function spOpenPrompt(s){
+  if(s.poolIdx >= s.pool.length){ s.pool = shuffle(s.pool); s.poolIdx = 0; }
+  const item = s.pool[s.poolIdx++];
+  s.questions++;
+  s.prompt = { item, input:'', checked:false, lastCorrect:false, accentMissing:false, wordRevealed:false, wordHidden:false, started:false };
+  s.firing = false;
+  pauseArcadeCountdown();
+  s.needsRender = true;
+}
+function spResume(){
+  const s = state.shooter;
+  if(!s || !s.prompt) return;
+  clearShooterRevealTimer();
+  if('speechSynthesis' in window) window.speechSynthesis.cancel();
+  s.prompt = null; s.sincePrompt = 0;
+  render();
+}
+function spCheck(){
+  const s = state.shooter;
+  if(!s || !s.prompt || s.prompt.checked) return;
+  const q = s.prompt, info = modeInfo(q.item.mode);
+  const result = gradeSpelling(q.input, q.item.word[info.gradeField]);
+  q.checked = true; q.lastCorrect = result.correct; q.accentMissing = result.accentMissing;
+  clearShooterRevealTimer();
+  if(result.correct){
+    s.rockets++; s.correct++;
+    s.banner = 'Rocket ready! 🚀'; s.bannerUntil = s.time + 2.5;
+    sfxStarChime();
+  }
+  render();
+  if(result.correct && !result.accentMissing){
+    const thisPrompt = q;
+    setTimeout(()=>{ if(state.shooter===s && s.prompt===thisPrompt) spResume(); }, 1300);
+  }
+}
+function spPromptHtml(s){
+  const q = s.prompt, info = modeInfo(q.item.mode), word = q.item.word;
+  const shownWord = word[info.shownField] || '';
+  const wordVisible = !info.revealTimer || (q.wordRevealed && !q.wordHidden);
+  return `<div class="racer-prompt">
+    <div class="card racer-prompt-card">
+      <p class="muted" style="text-align:center;margin:0;">Spell it right to earn a rocket! 🚀</p>
+      <div class="word-row">
+        <div class="practice-word${wordVisible ? '' : ' word-faded'}" id="sp-shown-word" style="margin-top:0.4rem;">${wordVisible ? escapeHtml(shownWord) : ''}</div>
+        ${speakBtn(shownWord, 'en-GB', null)}
+      </div>
+      <input type="text" id="sp-answer" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${info.placeholder}" ${q.checked?'disabled':''} value="${escapeHtml(q.input)}">
+      ${q.checked ? feedbackHtml({ mode:q.item.mode, lastCorrect:q.lastCorrect, accentMissing:q.accentMissing }, word) : ''}
+      ${q.checked
+        ? `<button class="btn-primary btn-block" id="sp-continue" style="margin-top:0.8rem;">Back to blasting</button>`
+        : `<button class="btn-primary btn-block" id="sp-check">Check</button>`}
+    </div>
+  </div>`;
+}
+function spWirePrompt(s){
+  const q = s.prompt, info = modeInfo(q.item.mode), word = q.item.word;
+  const input = document.getElementById('sp-answer');
+  if(input){
+    if(!q.checked) input.focus();
+    input.oninput = (e)=>{ q.input = e.target.value; };
+    input.onkeydown = (e)=>{ if(e.key==='Enter'){ e.preventDefault(); if(q.checked) spResume(); else spCheck(); } };
+  }
+  const checkBtn = document.getElementById('sp-check'); if(checkBtn) checkBtn.onclick = spCheck;
+  const contBtn = document.getElementById('sp-continue');
+  if(contBtn){ contBtn.onclick = spResume; if(!input || input.disabled) contBtn.focus(); }
+  // Listen, then the word flashes up for 1 second and fades (same as the racer's pit stops).
+  if(!q.started && !q.checked){
+    q.started = true;
+    const shownWord = word[info.shownField] || '';
+    speakSequence(info.audio(word)).then(()=>{
+      if(!info.revealTimer || state.shooter!==s || s.prompt!==q || q.checked) return;
+      q.wordRevealed = true;
+      const el = document.getElementById('sp-shown-word');
+      if(el){ el.textContent = shownWord; el.classList.remove('word-faded'); }
+      spRevealTimer = setTimeout(()=>{
+        spRevealTimer = null;
+        const el2 = document.getElementById('sp-shown-word');
+        if(el2) el2.classList.add('word-faded');
+        setTimeout(()=>{
+          if(state.shooter===s && s.prompt===q && !q.checked){
+            q.wordHidden = true;
+            const el3 = document.getElementById('sp-shown-word');
+            if(el3) el3.textContent = '';
+          }
+        }, 450);
+      }, RACER_FLASH_MS);
+    });
+  }
+}
+// ---- Space Blaster setup (pick an English list) and game screen ----
+const SP_RECENT_LISTS = 5;
+function renderShooterSetup(){
+  const english = state.lists.filter(l=>(l.lang||'es')==='en').slice().sort((a,b)=>(b.savedAt||0)-(a.savedAt||0));
+  if(!english.some(l=>l.id===game.shooterListId)) game.shooterListId = english.length ? english[0].id : null;
+  const shown = state.shooterShowAll ? english : english.slice(0, SP_RECENT_LISTS);
+  // Keep the chosen list visible even if it's an older one
+  if(game.shooterListId && !shown.some(l=>l.id===game.shooterListId)){ const chosen = english.find(l=>l.id===game.shooterListId); if(chosen) shown.push(chosen); }
+  const hasTime = (game.arcadeMs||0) > 0;
+  const rows = shown.map((l,i)=>`
+    <label class="list-chip racer-list-row${game.shooterListId===l.id?' selected':''}" for="spl-${l.id}">
+      <span style="display:flex;align-items:center;gap:0.7rem;">
+        <input type="radio" name="sp-list" class="sp-list-radio" id="spl-${l.id}" data-id="${l.id}" ${game.shooterListId===l.id?'checked':''}>
+        <span><strong>${escapeHtml(l.label)}</strong>${i===0 && !state.shooterShowAll ? ' <span class="hatching-note" style="margin:0 0 0 0.3rem;">Newest</span>' : ''}<br><span class="meta">${l.count} word${l.count===1?'':'s'}</span></span>
+      </span>
+    </label>`).join('');
+  app.innerHTML = `
+    <button class="btn-ghost" id="btn-back-arcade">← Back to Arcade</button>
+    <h2 class="section-title">Space Blaster</h2>
+    <p class="muted">Blast the alien ships as they swoop down. Every 20 seconds a spelling pops up, get it right to earn a rocket with a giant BOOM!</p>
+    ${state.error ? `<div class="error-box">${escapeHtml(state.error)}</div>` : ''}
+    <div class="card">
+      <h3 style="margin-top:0;">Which English list?</h3>
+      ${english.length ? `<p class="muted" style="margin-top:0;">Your most recent lists are at the top.</p>${rows}
+        ${english.length > SP_RECENT_LISTS ? `<button class="btn-ghost" id="btn-sp-more" style="padding-left:0;">${state.shooterShowAll ? 'Show only recent lists' : `Show older lists (${english.length - SP_RECENT_LISTS} more)`}</button>` : ''}`
+        : `<p class="muted" style="margin:0;">No English lists saved yet. Add one from Home (English practice), then come back to play.</p>`}
+    </div>
+    <button class="btn-primary btn-block" id="btn-sp-start" ${hasTime && game.shooterListId ? '' : 'disabled'}>Start blasting</button>
+    ${!hasTime ? `<p class="muted" style="text-align:center;">No arcade time left, score 90%+ three times on a list to earn more!</p>` : ''}
+  `;
+  document.getElementById('btn-back-arcade').onclick = ()=>{ state.error=''; state.view='arcade'; render(); };
+  const more = document.getElementById('btn-sp-more');
+  if(more) more.onclick = ()=>{ state.shooterShowAll = !state.shooterShowAll; render(); };
+  document.querySelectorAll('.sp-list-radio').forEach(rb=>{ rb.onchange = ()=>{ game.shooterListId = rb.dataset.id; render(); }; });
+  const startBtn = document.getElementById('btn-sp-start');
+  startBtn.onclick = async ()=>{
+    if((game.arcadeMs||0)<=0 || !game.shooterListId) return;
+    unlockSpeech(); // must run synchronously inside the tap, before any await, so questions can speak
+    getGameAudio();
+    startBtn.disabled = true; startBtn.textContent = 'Loading words…';
+    const words = await getListWords(game.shooterListId);
+    const pool = words.map(w=>(w.english||'').trim()).filter(Boolean).map(english=>({ mode:'copy-en', listId:game.shooterListId, word:{ english, spanish:'' } }));
+    if(!pool.length){ state.error = "That list doesn't have any words to spell yet."; render(); return; }
+    state.error = '';
+    await saveGame();
+    state.shooter = newShooter(pool);
+    state.view = 'arcade-shooter'; render();
+  };
+}
+function renderShooter(){
+  const s = state.shooter;
+  if(!s){ state.view = 'arcade-shooter-setup'; render(); return; }
+  const charId = game.selectedShooterSevling;
+  const charSevling = charId ? SEVLINGS.find(x=>x.id===charId) : null;
+  const hasTime = (game.arcadeMs||0) > 0;
+  app.innerHTML = `
+    <button class="btn-ghost" id="btn-back-arcade">← Back to Arcade</button>
+    <h2 class="section-title">Space Blaster</h2>
+    <p class="progress" style="text-align:center;">Wave <span id="sp-wave">${s.wave}</span> &nbsp;·&nbsp; Score <span id="sp-score">${s.score}</span> &nbsp;·&nbsp; <span id="sp-lives">${'❤️'.repeat(Math.max(0,s.lives))}</span> &nbsp;·&nbsp; 🚀 <span id="sp-rockets">${s.rockets}</span> &nbsp;·&nbsp; Arcade time left: <span id="arcade-timer">${formatMs(game.arcadeMs||0)}</span>${s.prompt ? ' (paused)' : ''}</p>
+    ${s.wonItemName ? `<div class="card reward-card" style="border-top-color:var(--gold);"><p class="muted" style="text-align:center;margin:0;">🎁 You won ${escapeHtml(s.wonItemName)} for ${escapeHtml(charSevling?charSevling.name:'your Sevling')}! Happiness +15</p></div>` : ''}
+    ${s.over ? `<div class="card" style="text-align:center;"><div class="reward-name">Game over!</div><p class="muted" style="margin:0.3rem 0 0;">You blasted ${s.kills} alien${s.kills===1?'':'s'} and reached wave ${s.wave}. Score ${s.score}. Spellings right: ${s.correct} of ${s.questions}.</p></div>` : ''}
+    ${(!hasTime) ? `<div class="card"><p class="muted" style="text-align:center;font-size:0.85rem;margin:0;">${s.over ? 'Out of arcade time, score 90%+ three times on a list to earn more!' : 'Your arcade time has run out, but you can finish this game.'}</p></div>` : ''}
+    <div class="card game-card">
+      <div class="game-stage" style="aspect-ratio:${SP_W}/${SP_H};background:${SP_SKY};">
+        <canvas id="sp-canvas" class="game-canvas" aria-label="Space Blaster, hold your finger on the board to fly and fire"></canvas>
+        ${charSevling ? `<div id="sp-face" class="game-face" style="width:${(24/SP_W*100).toFixed(2)}%;">${sevlingIcon(charSevling,false,true)}</div>` : ''}
+        ${s.prompt ? spPromptHtml(s) : ''}
+      </div>
+    </div>
+    ${(s.over || s.prompt) ? '' : `
+    <button class="btn-primary btn-block sp-rocket-btn" id="btn-sp-rocket" ${s.rockets>0?'':'disabled'} style="margin-top:0.9rem;font-size:1.25rem;padding:1rem;">🚀 Fire rocket (<span class="sp-rocket-count">${s.rockets}</span>)</button>
+    <p class="muted" style="text-align:center;margin:0.4rem 0 0;">Hold your finger on the board to fly and fire lasers. Spell words right to earn rockets.</p>`}
+    <div class="btn-row" style="margin-top:1rem;justify-content:center;">
+      <button class="btn-secondary" id="btn-sp-again" ${hasTime?'':'disabled'}>${s.over ? 'Play again' : 'New game'}</button>
+      <button class="btn-secondary" id="btn-sp-list">Change list</button>
+    </div>
+  `;
+  const leave = ()=>{ stopAllArcadeIntervals(); if('speechSynthesis' in window) window.speechSynthesis.cancel(); };
+  document.getElementById('btn-back-arcade').onclick = ()=>{ leave(); state.view='arcade'; render(); };
+  document.getElementById('btn-sp-list').onclick = ()=>{ leave(); state.view='arcade-shooter-setup'; render(); };
+  document.getElementById('btn-sp-again').onclick = ()=>{
+    if((game.arcadeMs||0)<=0) return;
+    unlockSpeech(); getGameAudio();
+    leave();
+    state.shooter = newShooter(s.pool); render();
+  };
+  const rocketBtn = document.getElementById('btn-sp-rocket');
+  if(rocketBtn){ rocketBtn.onpointerdown = (e)=>{ e.preventDefault(); spFireRocket(); }; rocketBtn.onclick = (e)=>e.preventDefault(); }
+  const canvas = adoptPersistentCanvas('sp-canvas');
+  const toLogicalX = (e)=>{ const r = canvas.getBoundingClientRect(); return (e.clientX - r.left) / r.width * SP_W; };
+  canvas.onpointerdown = (e)=>{ e.preventDefault(); try{ canvas.setPointerCapture(e.pointerId); }catch(_){} if(state.shooter){ state.shooter.firing = true; state.shooter.player.targetX = toLogicalX(e); } };
+  canvas.onpointermove = (e)=>{ if(state.shooter && (e.pointerType==='mouse' || e.buttons)) state.shooter.player.targetX = toLogicalX(e); };
+  canvas.onpointerup = canvas.onpointercancel = canvas.onlostpointercapture = ()=>{ if(state.shooter) state.shooter.firing = false; };
+  canvas.oncontextmenu = (e)=>e.preventDefault();
+  s.firing = false;
+  if(s.prompt) spWirePrompt(s);
+  spDraw(s);
+  if(!s.over){
+    startArcadeRaf(spLoopStep);
+    if(hasTime && !s.prompt) startArcadeCountdown(()=>render());
   }else{
     stopAllArcadeIntervals();
   }
