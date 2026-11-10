@@ -148,6 +148,14 @@
   .sevling-locked-img{ filter:brightness(0); }
   .sevling-worn-badges{ font-size:0.95rem; margin-bottom:0.2rem; }
   .game-card{ padding:0.5rem; }
+  .arcade-best{ font-size:0.85rem; margin:0 0 0.7rem; padding:0.5rem 0.7rem; background:var(--bg); border-radius:10px; line-height:1.45; }
+  .leader-row{ display:grid; grid-template-columns:2rem 1fr auto; gap:0.5rem; align-items:center; padding:0.5rem 0.4rem; border-top:1px solid rgba(34,26,61,0.12); }
+  .leader-row:first-of-type{ border-top:none; }
+  .leader-row.me{ background:rgba(0,194,255,0.08); border-radius:10px; }
+  .leader-medal{ font-size:1.3rem; text-align:center; }
+  .leader-name{ font-weight:700; }
+  .leader-score{ text-align:right; font-size:0.9rem; line-height:1.3; }
+  .leader-score .meta{ font-size:0.78rem; color:var(--ink-soft); }
   /* Full-screen Snake: the app's page chrome steps aside and the arena fills the screen */
   body.game-full{ overflow:hidden; }
   body.game-full #logo-badge, body.game-full #balance-badge{ display:none; }
@@ -209,7 +217,7 @@ const app = document.getElementById('app');
 // GitHub (bypassing every cache), reads the APP_VERSION inside it, and if it differs from the
 // one running, offers (or, on the sign-in/profile screens, just does) a reload. This matters most
 // for the iOS home-screen version, which otherwise keeps running an old cached copy.
-const APP_VERSION = '2026-11-10.6';
+const APP_VERSION = '2026-11-10.7';
 let latestSeenVersion = null, lastUpdateCheckAt = 0;
 function freshUrl(){ return location.origin + location.pathname + '?v=' + Date.now(); }
 async function fetchLatestVersion(){
@@ -465,7 +473,7 @@ function migrateSevlingIds(g){
   });
   return g;
 }
-function emptyGameState(){ return { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, listStreaks:{}, streakGoal:4, lastSevlingAt:null, cooldownDays:14, fullMarksSinceLastWin:0, arcadeMs:0, gameUnlockStreaks:{}, selectedSnakeSevling:null, selectedConnect4Sevling:null, selectedMazeSevling:null, selectedBrickSevling:null, selectedRacerSevling:null, racerListIds:[], racerSpanishMode:'copy', racerDifficulty:'speedy', selectedShooterSevling:null, shooterListId:null }; }
+function emptyGameState(){ return { totalEarned:0, balance:0, medals:{trophy:0,gold:0,silver:0,bronze:0}, unlockedSevlings:[], sevlingCare:{}, listStreaks:{}, streakGoal:4, lastSevlingAt:null, cooldownDays:14, fullMarksSinceLastWin:0, arcadeMs:0, gameUnlockStreaks:{}, selectedSnakeSevling:null, selectedConnect4Sevling:null, selectedMazeSevling:null, selectedBrickSevling:null, selectedRacerSevling:null, racerListIds:[], racerSpanishMode:'copy', racerDifficulty:'speedy', selectedShooterSevling:null, shooterListId:null, arcadeBests:{}, c4Streak:0 }; }
 let game = emptyGameState();
 let settings = { firebaseConfig:null };
 let fbApp = null, db = null, auth = null, authUser = null;
@@ -656,6 +664,9 @@ async function handleAuthChange(){
 }
 async function selectProfile(profileId){
   state.currentProfileId = profileId;
+  // Scores belong to whoever played: forget any other profile's unfinished games and cached leaderboard.
+  state.c4 = state.snake = state.maze = state.brick = state.racer = state.shooter = null;
+  state.familyBests = null; state.familyBestsAt = 0;
   game = await loadGame();
   settings.voicePrefs = await loadVoicePrefs();
   state.lists = (await getIndex()).sort((a,b)=>b.savedAt-a.savedAt);
@@ -988,6 +999,7 @@ function render(){
   else if(state.view==='arcade-racer') renderRacer();
   else if(state.view==='arcade-shooter-setup') renderShooterSetup();
   else if(state.view==='arcade-shooter') renderShooter();
+  else if(state.view==='arcade-leaderboard') renderArcadeLeaderboard();
   else if(state.view==='wordsearch-pick') renderWordSearchPicker();
   else if(state.view==='wordsearch') renderWordSearch();
   else if(state.view==='settings') renderSettings();
@@ -1935,6 +1947,7 @@ let arcadeTickInterval = null;
 let snakeLoopInterval = null;
 let mazeLoopInterval = null;
 function stopAllArcadeIntervals(){
+  arcadeRecordAll(); // leaving or ending a game always counts towards your best
   if(arcadeTickInterval){ clearInterval(arcadeTickInterval); arcadeTickInterval = null; }
   if(snakeLoopInterval){ clearInterval(snakeLoopInterval); snakeLoopInterval = null; }
   if(mazeLoopInterval){ clearInterval(mazeLoopInterval); mazeLoopInterval = null; }
@@ -1996,9 +2009,11 @@ function renderArcade(){
       <p class="muted" style="margin:0;">${hasTime ? 'Arcade time ready to play' : 'No arcade time yet'}</p>
     </div>
     ${!hasTime ? `<div class="card"><p class="muted" style="text-align:center;margin:0;">Score 90%+ three times in a row on the same word list to earn 5 minutes of arcade time.</p></div>` : ''}
+    <button class="btn-secondary btn-block" id="btn-leaderboard" style="margin-bottom:1rem;">🏆 Family leaderboard</button>
     <div class="card">
       <h3 style="margin-top:0;">Connect 4</h3>
       <p class="muted">Play against a Sevling.</p>
+      ${arcadeBestLine('connect4')}
       <label class="muted" style="display:block;margin-bottom:0.2rem;">Opponent</label>
       <select id="c4-sevling" ${won.length?'':'disabled'}>${c4Options}</select>
       <button class="btn-primary btn-block" id="btn-play-c4" ${hasTime?'':'disabled'}>Play Connect 4</button>
@@ -2006,6 +2021,7 @@ function renderArcade(){
     <div class="card">
       <h3 style="margin-top:0;">Snake</h3>
       <p class="muted">Guide your Sevling to the food.</p>
+      ${arcadeBestLine('snake')}
       <label class="muted" style="display:block;margin-bottom:0.2rem;">Choose your Sevling</label>
       <select id="snake-sevling" ${won.length?'':'disabled'}>${snakeOptions}</select>
       <button class="btn-primary btn-block" id="btn-play-snake" ${hasTime?'':'disabled'}>Play Snake</button>
@@ -2013,6 +2029,7 @@ function renderArcade(){
     <div class="card">
       <h3 style="margin-top:0;">Maze Munch</h3>
       <p class="muted">Gobble every dot in the maze while dodging the baddies.</p>
+      ${arcadeBestLine('maze')}
       <label class="muted" style="display:block;margin-bottom:0.2rem;">Choose your muncher</label>
       <select id="maze-sevling" ${won.length?'':'disabled'}>${mazeOptions}</select>
       <button class="btn-primary btn-block" id="btn-play-maze" ${hasTime?'':'disabled'}>Play Maze Munch</button>
@@ -2020,6 +2037,7 @@ function renderArcade(){
     <div class="card">
       <h3 style="margin-top:0;">Brick Breaker</h3>
       <p class="muted">Bounce the ball to smash every brick. Catch the falling icons for power-ups.</p>
+      ${arcadeBestLine('brick')}
       <label class="muted" style="display:block;margin-bottom:0.2rem;">Choose your paddle</label>
       <select id="brick-sevling" ${won.length?'':'disabled'}>${brickOptions}</select>
       <button class="btn-primary btn-block" id="btn-play-brick" ${hasTime?'':'disabled'}>Play Brick Breaker</button>
@@ -2027,6 +2045,7 @@ function renderArcade(){
     <div class="card">
       <h3 style="margin-top:0;">Overhead Racer</h3>
       <p class="muted">Race two computer cars round a neon track, spell words at pit stops for turbo boosts.</p>
+      ${arcadeBestLine('racer')}
       <label class="muted" style="display:block;margin-bottom:0.2rem;">Choose your driver</label>
       <select id="racer-sevling" ${won.length?'':'disabled'}>${racerOptions}</select>
       <button class="btn-primary btn-block" id="btn-play-racer" ${hasTime?'':'disabled'}>Choose words and race</button>
@@ -2034,11 +2053,14 @@ function renderArcade(){
     <div class="card">
       <h3 style="margin-top:0;">Space Blaster</h3>
       <p class="muted">Blast the swooping alien ships with lasers. Spell English words right to earn rockets that go BOOM!</p>
+      ${arcadeBestLine('shooter')}
       <label class="muted" style="display:block;margin-bottom:0.2rem;">Choose your pilot</label>
       <select id="shooter-sevling" ${won.length?'':'disabled'}>${shooterOptions}</select>
       <button class="btn-primary btn-block" id="btn-play-shooter" ${hasTime?'':'disabled'}>Choose a list and play</button>
     </div>
   `;
+  document.getElementById('btn-leaderboard').onclick = ()=>{ state.view='arcade-leaderboard'; render(); };
+  refreshFamilyBests('arcade');
   document.getElementById('btn-play-c4').onclick = async ()=>{
     game.selectedConnect4Sevling = document.getElementById('c4-sevling').value || null;
     await saveGame();
@@ -2077,6 +2099,125 @@ function renderArcade(){
     state.shooter = null; state.error = ''; state.shooterShowAll = false;
     state.view = 'arcade-shooter-setup'; render();
   };
+}
+
+// ---- Arcade top scores and the family leaderboard ----
+// Each profile keeps its best result per game in its own game doc (game.arcadeBests), with the
+// date it was set. The leaderboard reads every profile in the family login (they all live under
+// the same account, so no extra Firestore rules are needed).
+// "Best" means levels cleared first where a game has levels, then points:
+const ARCADE_GAMES = [
+  { id:'connect4', name:'Connect 4',      emoji:'🔴', measure:'Most wins in a row' },
+  { id:'snake',    name:'Snake',          emoji:'🐍', measure:'Most apples eaten' },
+  { id:'maze',     name:'Maze Munch',     emoji:'🟡', measure:'Most dots eaten' },
+  { id:'brick',    name:'Brick Breaker',  emoji:'🧱', measure:'Walls cleared, then points' },
+  { id:'racer',    name:'Overhead Racer', emoji:'🏎️', measure:'Best place, then fastest time' },
+  { id:'shooter',  name:'Space Blaster',  emoji:'🚀', measure:'Waves cleared, then points' }
+];
+const plural = (n, word)=>`${n} ${word}${n===1?'':'s'}`;
+function formatRaceTime(sec){ const m = Math.floor(sec/60), s = sec - m*60; return `${m}:${s<10?'0':''}${s.toFixed(1)}`; }
+function arcadeRunResult(gameId, run){
+  if(!run) return null;
+  if(gameId==='snake'){ if(!(run.score>0)) return null; return { key:[run.score,0], label: plural(run.score,'apple') }; }
+  if(gameId==='maze'){ if(!(run.score>0)) return null; return { key:[run.score, run.won?1:0], label: run.won ? `Cleared the maze! (${run.score} dots)` : plural(run.score,'dot') }; }
+  if(gameId==='brick'){ const w = run.wallsCleared||0; if(!w && !(run.score>0)) return null; return { key:[w, run.score||0], label: `${plural(w,'wall')} cleared · ${run.score||0} pts` }; }
+  if(gameId==='shooter'){ const w = run.wavesCleared||0; if(!w && !(run.score>0)) return null; return { key:[w, run.score||0], label: `${plural(w,'wave')} cleared · ${run.score||0} pts` }; }
+  if(gameId==='racer'){ if(run.phase!=='finished' || !run.place) return null; const t = run.finishTime||0; return { key:[-run.place, -Math.round(t*10)], label: `${ordinal(run.place)} place · ${formatRaceTime(t)}` }; }
+  if(gameId==='connect4'){ if(!(run.streak>0)) return null; return { key:[run.streak,0], label: `${plural(run.streak,'win')} in a row` }; }
+  return null;
+}
+function arcadeKeyBetter(a, b){
+  if(!b) return true;
+  for(let i=0;i<Math.max(a.length,b.length);i++){ const x = a[i]||0, y = b[i]||0; if(x!==y) return x>y; }
+  return false;
+}
+// Records a run if it beats this profile's best. Safe to call repeatedly for the same run.
+// Returns { isNew, familyRecord } so game-over screens can celebrate.
+function arcadeRecordRun(gameId, run){
+  if(!run) return null;
+  const res = arcadeRunResult(gameId, run);
+  if(!res) return run._record || null;
+  const k = res.key.join(',');
+  if(run._recordKey===k) return run._record;
+  if(!game.arcadeBests) game.arcadeBests = {};
+  const prev = game.arcadeBests[gameId];
+  let out = { isNew:false, familyRecord:false };
+  if(!prev || arcadeKeyBetter(res.key, prev.key)){
+    const othersBeaten = familyEntries(gameId).filter(e=>e.pid!==state.currentProfileId).every(e=>arcadeKeyBetter(res.key, e.best.key));
+    const hadOthers = familyEntries(gameId).some(e=>e.pid!==state.currentProfileId);
+    game.arcadeBests[gameId] = { key:res.key, label:res.label, at:Date.now() };
+    out = { isNew:true, familyRecord: othersBeaten && hadOthers };
+    saveGame();
+  }else if(run._record && run._record.isNew){
+    out = run._record; // an earlier, smaller milestone of this same run was already a new best
+  }
+  run._recordKey = k; run._record = out;
+  return out;
+}
+function arcadeRecordAll(){
+  [['snake',state.snake],['maze',state.maze],['brick',state.brick],['racer',state.racer],['shooter',state.shooter]].forEach(([id,run])=>{ try{ arcadeRecordRun(id, run); }catch(e){} });
+}
+function arcadeNewBestHtml(rec){
+  if(!rec || !rec.isNew) return '';
+  return `<div class="hatching-note" style="font-size:0.9rem;padding:0.25rem 0.8rem;margin:0.4rem auto 0;">${rec.familyRecord ? '🥇 New family record!' : '🏆 New personal best!'}</div>`;
+}
+// Bests for the other profiles in the family, loaded when the Arcade or leaderboard opens.
+async function loadFamilyBests(){
+  if(!db || !authUser) return;
+  const out = {};
+  for(const p of (state.profiles||[])){
+    if(p.id===state.currentProfileId) continue;
+    try{
+      const snap = await getDoc(doc(db,'spelling_users', authUser.uid, 'profiles', p.id, 'data','game'));
+      out[p.id] = { name:p.name, bests: (snap.exists() && snap.data().arcadeBests) || {} };
+    }catch(e){}
+  }
+  state.familyBests = out; state.familyBestsAt = Date.now();
+}
+function refreshFamilyBests(viewName){
+  if(state.familyBestsLoading || (state.familyBestsAt && Date.now()-state.familyBestsAt < 20000)) return;
+  state.familyBestsLoading = true;
+  loadFamilyBests().finally(()=>{ state.familyBestsLoading = false; if(state.view===viewName) render(); });
+}
+function familyEntries(gameId){
+  const list = [];
+  const me = (state.profiles||[]).find(p=>p.id===state.currentProfileId);
+  if(game.arcadeBests && game.arcadeBests[gameId]) list.push({ pid:state.currentProfileId, name: me ? me.name : 'You', best: game.arcadeBests[gameId] });
+  Object.entries(state.familyBests||{}).forEach(([pid, f])=>{ if(f.bests && f.bests[gameId]) list.push({ pid, name:f.name, best:f.bests[gameId] }); });
+  return list.sort((a,b)=> arcadeKeyBetter(a.best.key, b.best.key) ? -1 : (arcadeKeyBetter(b.best.key, a.best.key) ? 1 : (a.best.at||0)-(b.best.at||0)));
+}
+function shortDate(ts){ return ts ? new Date(ts).toLocaleDateString('en-GB',{ day:'numeric', month:'short', year:'numeric' }) : ''; }
+function arcadeBestLine(gameId){
+  const mine = game.arcadeBests && game.arcadeBests[gameId];
+  const top = familyEntries(gameId)[0];
+  const minePart = mine ? `🏆 Your best: <strong>${escapeHtml(mine.label)}</strong> (${shortDate(mine.at)})` : '🏆 No best score yet, play to set one!';
+  const famPart = top && top.pid!==state.currentProfileId ? `<br>🥇 Family record: <strong>${escapeHtml(top.name)}</strong>, ${escapeHtml(top.best.label)} (${shortDate(top.best.at)})` : (top ? '<br>🥇 You hold the family record!' : '');
+  return `<p class="muted arcade-best">${minePart}${famPart}</p>`;
+}
+function renderArcadeLeaderboard(){
+  refreshFamilyBests('arcade-leaderboard');
+  const medals = ['🥇','🥈','🥉'];
+  app.innerHTML = `
+    <button class="btn-ghost" id="btn-back-arcade">← Back to Arcade</button>
+    <div class="masthead" style="text-align:center;">
+      <h1>Family leaderboard</h1>
+      <p>Everyone's best score in each game, and when they set it.</p>
+    </div>
+    ${ARCADE_GAMES.map(g=>{
+      const rows = familyEntries(g.id);
+      return `<div class="card">
+        <h3 style="margin:0;">${g.emoji} ${g.name}</h3>
+        <p class="muted" style="margin:0 0 0.6rem;font-size:0.82rem;">${g.measure}</p>
+        ${rows.length ? rows.map((e,i)=>`<div class="leader-row${e.pid===state.currentProfileId?' me':''}">
+          <span class="leader-medal">${medals[i] || (i+1)+'.'}</span>
+          <span class="leader-name">${escapeHtml(e.name)}</span>
+          <span class="leader-score">${escapeHtml(e.best.label)}<br><span class="meta">${shortDate(e.best.at)}</span></span>
+        </div>`).join('') : `<p class="muted" style="margin:0;">No scores yet.</p>`}
+      </div>`;
+    }).join('')}
+    ${state.familyBestsLoading && !state.familyBestsAt ? `<p class="muted" style="text-align:center;"><span class="spinner"></span>Loading the family's scores…</p>` : ''}
+  `;
+  document.getElementById('btn-back-arcade').onclick = ()=>{ state.view='arcade'; render(); };
 }
 
 // ---- Connect 4 ----
@@ -2141,6 +2282,7 @@ function renderConnect4(){
     ${c4.wonItemName ? `<div class="card reward-card" style="border-top-color:var(--gold);"><p class="muted" style="text-align:center;margin:0;">\uD83C\uDF81 You won ${escapeHtml(c4.wonItemName)} for ${escapeHtml(oppSevling?oppSevling.name:'your Sevling')}! Happiness +15</p></div>` : ''}
     <div class="card">
       <p class="muted" style="text-align:center;margin:0 0 0.6rem 0;">${statusText}</p>
+      ${c4.over && c4.winner===1 ? `<p class="muted" style="text-align:center;margin:-0.3rem 0 0.6rem;">${game.c4Streak} win${game.c4Streak===1?'':'s'} in a row!</p><div style="text-align:center;margin:-0.3rem 0 0.6rem;">${arcadeNewBestHtml(c4.record)}</div>` : ''}
       ${(!hasTime) ? `<p class="muted" style="text-align:center;font-size:0.85rem;margin:0 0 0.6rem 0;">${c4.over ? 'Out of arcade time, score 90%+ three times on a list to earn more!' : "Your arcade time has run out, but you can finish this game."}</p>` : ''}
       <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;max-width:320px;margin:0 auto;">${boardHtml}</div>
     </div>
@@ -2165,6 +2307,9 @@ function c4PlayerMove(col){
   const win = c4CheckWin(c4.board,col,row,1);
   if(win){
     c4.over=true; c4.winner=1; c4.winCells=win;
+    game.c4Streak = (game.c4Streak||0) + 1;
+    c4.record = arcadeRecordRun('connect4', { streak: game.c4Streak });
+    saveGame();
     const sevlingId = game.selectedConnect4Sevling;
     if(sevlingId) awardSevlingItem(sevlingId).then(itemName=>{ c4.wonItemName = itemName; render(); });
     render(); return;
@@ -2178,7 +2323,7 @@ function c4PlayerMove(col){
     const aiRow = c4DropRow(c4.board,aiCol);
     c4.board[aiCol].push(2);
     const aiWin = c4CheckWin(c4.board,aiCol,aiRow,2);
-    if(aiWin){ c4.over=true; c4.winner=2; c4.winCells=aiWin; }
+    if(aiWin){ c4.over=true; c4.winner=2; c4.winCells=aiWin; game.c4Streak = 0; saveGame(); }
     else if(c4ValidCols(c4.board).length===0){ c4.over=true; c4.winner='draw'; }
     else c4.turn=1;
     render();
@@ -2302,6 +2447,7 @@ function renderSnakeGame(){
         ${s.over ? '' : `<div class="snake-zones">${zone('up','↑')}${zone('down','↓')}${zone('left','←')}${zone('right','→')}</div>`}
         ${s.over ? `<div class="snake-over"><div class="card" style="text-align:center;margin:0;">
           <div class="reward-name">Game over!</div>
+          ${arcadeNewBestHtml(arcadeRecordRun('snake', s))}
           <p class="muted" style="margin:0.3rem 0 0.9rem;">Final score: ${s.score}</p>
           ${s.wonItemName ? `<p class="muted" style="margin:0 0 0.9rem;">🎁 You won ${escapeHtml(s.wonItemName)} for ${escapeHtml(headSevling?headSevling.name:'your Sevling')}! Happiness +15</p>` : ''}
           ${hasTime ? '' : `<p class="muted" style="margin:0 0 0.9rem;font-size:0.85rem;">Out of arcade time, score 90%+ three times on a list to earn more!</p>`}
@@ -2462,7 +2608,7 @@ function renderMazeGame(){
     <h2 class="section-title">Maze Munch</h2>
     <p class="progress" style="text-align:center;">Dots left: ${m.dotsLeft} &nbsp;\u00B7&nbsp; Arcade time left: <span id="arcade-timer">${formatMs(game.arcadeMs||0)}</span></p>
     ${m.wonItemName ? `<div class="card reward-card" style="border-top-color:var(--gold);"><p class="muted" style="text-align:center;margin:0;">\uD83C\uDF81 You won ${escapeHtml(m.wonItemName)} for ${escapeHtml(charSevling?charSevling.name:'your Sevling')}! Happiness +15</p></div>` : ''}
-    ${m.over ? `<div class="card"><p class="muted" style="text-align:center;margin:0;">${m.won ? 'You ate every dot! \uD83C\uDF89' : 'Caught! Game over.'}</p></div>` : ''}
+    ${m.over ? `<div class="card" style="text-align:center;"><p class="muted" style="text-align:center;margin:0;">${m.won ? 'You ate every dot! \uD83C\uDF89' : 'Caught! Game over.'}</p>${arcadeNewBestHtml(arcadeRecordRun('maze', m))}</div>` : ''}
     ${(!hasTime) ? `<div class="card"><p class="muted" style="text-align:center;font-size:0.85rem;margin:0;">${m.over ? 'Out of arcade time, score 90%+ three times on a list to earn more!' : 'Your arcade time has run out, but you can finish this game.'}</p></div>` : ''}
     <div class="card" style="padding:0.5rem;">
       <div style="width:100%;max-width:560px;margin:0 auto;position:relative;">
@@ -2956,6 +3102,7 @@ function bbStep(bb, dt){
   }
   if(bb.bricks.every(br=>!br.alive)){
     bb.levelClearT = 1.6; bb.balls = []; bb.drops = []; bb.bolts = [];
+    bb.wallsCleared = (bb.wallsCleared||0) + 1;
     bb.banner = 'Wall cleared! \uD83C\uDF89'; bb.bannerUntil = bb.time + 1.6;
   }
 }
@@ -3075,7 +3222,7 @@ function renderBrickBreaker(){
     <h2 class="section-title">Brick Breaker</h2>
     <p class="progress" style="text-align:center;">Level <span id="bb-level">${bb.level}</span> &nbsp;\u00B7&nbsp; Score <span id="bb-score">${bb.score}</span> &nbsp;\u00B7&nbsp; <span id="bb-lives">${'\u2764\uFE0F'.repeat(Math.max(0,bb.lives))}</span> &nbsp;\u00B7&nbsp; Arcade time left: <span id="arcade-timer">${formatMs(game.arcadeMs||0)}</span></p>
     ${bb.wonItemName ? `<div class="card reward-card" style="border-top-color:var(--gold);"><p class="muted" style="text-align:center;margin:0;">\uD83C\uDF81 You won ${escapeHtml(bb.wonItemName)} for ${escapeHtml(charSevling?charSevling.name:'your Sevling')}! Happiness +15</p></div>` : ''}
-    ${bb.over ? `<div class="card"><p class="muted" style="text-align:center;margin:0;">Game over! You broke ${bb.bricksBroken} brick${bb.bricksBroken===1?'':'s'} and scored ${bb.score}.</p></div>` : ''}
+    ${bb.over ? `<div class="card" style="text-align:center;"><p class="muted" style="text-align:center;margin:0;">Game over! You cleared ${bb.wallsCleared||0} wall${(bb.wallsCleared||0)===1?'':'s'}, broke ${bb.bricksBroken} brick${bb.bricksBroken===1?'':'s'} and scored ${bb.score}.</p>${arcadeNewBestHtml(arcadeRecordRun('brick', bb))}</div>` : ''}
     ${(!hasTime) ? `<div class="card"><p class="muted" style="text-align:center;font-size:0.85rem;margin:0;">${bb.over ? 'Out of arcade time, score 90%+ three times on a list to earn more!' : 'Your arcade time has run out, but you can finish this game.'}</p></div>` : ''}
     <div class="card game-card">
       <div class="game-stage" style="aspect-ratio:${BB_W}/${BB_H};">
@@ -3360,6 +3507,7 @@ function racerStep(r, dt){
   if(player.finished){
     r.phase = 'finished';
     r.place = player.finishOrder;
+    r.finishTime = Math.max(0, r.time - 3.4); // race clock starts at "Go!"; the 3.4s countdown is excluded
     const sevlingId = game.selectedRacerSevling;
     if(sevlingId) awardSevlingItem(sevlingId).then(itemName=>{ r.wonItemName = itemName; if(state.view==='arcade-racer' && state.racer===r) render(); });
     r.needsRender = true;
@@ -3676,7 +3824,7 @@ function renderRacer(){
     <h2 class="section-title">Overhead Racer</h2>
     <p class="progress" style="text-align:center;">Lap <span id="racer-lap">${Math.min(RACER_LAPS, Math.max(1, player.laps+1))}/${RACER_LAPS}</span> &nbsp;\u00B7&nbsp; <span id="racer-pos">${ordinal(racerPositions(r).indexOf(player)+1)}</span> &nbsp;\u00B7&nbsp; Arcade time left: <span id="arcade-timer">${formatMs(game.arcadeMs||0)}</span>${r.prompt ? ' (paused)' : ''}</p>
     ${r.wonItemName ? `<div class="card reward-card" style="border-top-color:var(--gold);"><p class="muted" style="text-align:center;margin:0;">\uD83C\uDF81 You won ${escapeHtml(r.wonItemName)} for ${escapeHtml(charSevling?charSevling.name:'your Sevling')}! Happiness +15</p></div>` : ''}
-    ${finished ? `<div class="card" style="text-align:center;"><div class="reward-name">${placeLine}</div><p class="muted" style="margin:0.3rem 0 0;">Spelling turbos: ${r.boostsEarned} of ${r.questions}</p></div>` : ''}
+    ${finished ? `<div class="card" style="text-align:center;"><div class="reward-name">${placeLine}</div>${arcadeNewBestHtml(arcadeRecordRun('racer', r))}<p class="muted" style="margin:0.3rem 0 0;">Race time ${formatRaceTime(r.finishTime||0)} \u00B7 Spelling turbos: ${r.boostsEarned} of ${r.questions}</p></div>` : ''}
     ${(!hasTime) ? `<div class="card"><p class="muted" style="text-align:center;font-size:0.85rem;margin:0;">${finished ? 'Out of arcade time, score 90%+ three times on a list to earn more!' : 'Your arcade time has run out, but you can finish this race.'}</p></div>` : ''}
     <div class="card game-card">
       <div class="game-stage" style="aspect-ratio:1/1;">
@@ -4023,6 +4171,7 @@ function spStep(s, dt){
     if(s.waveClearT<=0){ s.wave++; spBuildWave(s); s.banner = `Wave ${s.wave}`; s.bannerUntil = s.time + 2; }
   }else if(s.aliens.every(a=>a.dead)){
     s.waveClearT = 2.2; s.enemyShots = [];
+    s.wavesCleared = (s.wavesCleared||0) + 1;
     s.banner = 'Wave cleared! 🎉'; s.bannerUntil = s.time + 2;
   }
 
@@ -4388,7 +4537,7 @@ function renderShooter(){
     <h2 class="section-title">Space Blaster</h2>
     <p class="progress" style="text-align:center;">Wave <span id="sp-wave">${s.wave}</span> &nbsp;·&nbsp; Score <span id="sp-score">${s.score}</span> &nbsp;·&nbsp; <span id="sp-lives">${'❤️'.repeat(Math.max(0,s.lives))}</span> &nbsp;·&nbsp; 🚀 <span id="sp-rockets">${s.rockets}</span> &nbsp;·&nbsp; Arcade time left: <span id="arcade-timer">${formatMs(game.arcadeMs||0)}</span>${s.prompt ? ' (paused)' : ''}</p>
     ${s.wonItemName ? `<div class="card reward-card" style="border-top-color:var(--gold);"><p class="muted" style="text-align:center;margin:0;">🎁 You won ${escapeHtml(s.wonItemName)} for ${escapeHtml(charSevling?charSevling.name:'your Sevling')}! Happiness +15</p></div>` : ''}
-    ${s.over ? `<div class="card" style="text-align:center;"><div class="reward-name">Game over!</div><p class="muted" style="margin:0.3rem 0 0;">You blasted ${s.kills} alien${s.kills===1?'':'s'} and reached wave ${s.wave}. Score ${s.score}. Spellings right: ${s.correct} of ${s.questions}.</p></div>` : ''}
+    ${s.over ? `<div class="card" style="text-align:center;"><div class="reward-name">Game over!</div>${arcadeNewBestHtml(arcadeRecordRun('shooter', s))}<p class="muted" style="margin:0.3rem 0 0;">You cleared ${s.wavesCleared||0} wave${(s.wavesCleared||0)===1?'':'s'} and blasted ${s.kills} alien${s.kills===1?'':'s'}. Score ${s.score}. Spellings right: ${s.correct} of ${s.questions}.</p></div>` : ''}
     ${(!hasTime) ? `<div class="card"><p class="muted" style="text-align:center;font-size:0.85rem;margin:0;">${s.over ? 'Out of arcade time, score 90%+ three times on a list to earn more!' : 'Your arcade time has run out, but you can finish this game.'}</p></div>` : ''}
     <div class="card game-card">
       <div class="game-stage" style="aspect-ratio:${SP_W}/${SP_H};background:${SP_SKY};">
