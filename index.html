@@ -148,12 +148,29 @@
   .sevling-locked-img{ filter:brightness(0); }
   .sevling-worn-badges{ font-size:0.95rem; margin-bottom:0.2rem; }
   .game-card{ padding:0.5rem; }
-  .page.page-wide{ max-width:1000px; padding-left:0.75rem; padding-right:0.75rem; }
-  .snake-wrap{ display:flex; justify-content:center; }
-  /* Board fills the width available, but never so tall that the arrows drop off the screen */
-  .snake-board{ position:relative; width:min(100%, calc(100vh - 400px)); width:min(100%, calc(100dvh - 400px)); min-width:min(100%, 280px); aspect-ratio:1/1; background:var(--bg); border:2px solid var(--ink); border-radius:12px; box-shadow:var(--shadow-ink); overflow:hidden; touch-action:none; -webkit-user-select:none; user-select:none; }
-  .snake-pad{ max-width:300px; margin:0.9rem auto 0; display:grid; grid-template-columns:repeat(3,1fr); gap:0.5rem; }
-  .snake-btn{ font-size:1.8rem; padding:1.1rem 0; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+  /* Full-screen Snake: the app's page chrome steps aside and the arena fills the screen */
+  body.game-full{ overflow:hidden; }
+  body.game-full #logo-badge, body.game-full #balance-badge{ display:none; }
+  .page.page-full{ max-width:none; padding:0; }
+  .snake-screen{ position:fixed; inset:0; display:flex; flex-direction:column; gap:0.5rem; padding:calc(0.5rem + env(safe-area-inset-top, 0px)) calc(0.5rem + env(safe-area-inset-right, 0px)) calc(0.5rem + env(safe-area-inset-bottom, 0px)) calc(0.5rem + env(safe-area-inset-left, 0px)); }
+  .snake-bar{ display:flex; align-items:center; justify-content:space-between; gap:0.5rem; flex-shrink:0; }
+  .snake-bar-btn{ padding:0.5rem 0.8rem; min-height:40px; font-size:0.9rem; }
+  .snake-bar-info{ display:flex; flex-direction:column; align-items:center; font-size:0.9rem; color:var(--ink-soft); line-height:1.25; text-align:center; }
+  .snake-bar-info strong{ color:var(--ink); font-family:'Baloo 2',sans-serif; font-size:1.15rem; }
+  .snake-area{ position:relative; flex:1; min-height:0; display:flex; align-items:center; justify-content:center; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+  .snake-board{ position:relative; background:var(--surface); border:2px solid var(--ink); border-radius:12px; box-shadow:var(--shadow-ink); overflow:hidden; background-image:radial-gradient(circle, rgba(34,26,61,0.08) 1.5px, transparent 1.6px); background-size:var(--cell) var(--cell); }
+  .snake-zones{ position:absolute; inset:0; pointer-events:none; z-index:3; }
+  .snake-zone{ position:absolute; inset:0; display:flex; transition:background 0.12s ease; }
+  .snake-zone span{ font-size:clamp(2rem, 7vmin, 4rem); font-weight:800; color:rgba(34,26,61,0.18); }
+  .snake-zone.flash{ background:rgba(0,194,255,0.14); }
+  .snake-zone.flash span{ color:rgba(34,26,61,0.4); }
+  .snake-zone-up{ clip-path:polygon(0 0, 100% 0, 50% 50%); justify-content:center; align-items:flex-start; padding-top:3%; }
+  .snake-zone-down{ clip-path:polygon(0 100%, 100% 100%, 50% 50%); justify-content:center; align-items:flex-end; padding-bottom:3%; }
+  .snake-zone-left{ clip-path:polygon(0 0, 0 100%, 50% 50%); justify-content:flex-start; align-items:center; padding-left:3%; }
+  .snake-zone-right{ clip-path:polygon(100% 0, 100% 100%, 50% 50%); justify-content:flex-end; align-items:center; padding-right:3%; }
+  .snake-over{ position:absolute; inset:0; z-index:4; display:flex; align-items:center; justify-content:center; padding:1rem; background:rgba(34,26,61,0.3); }
+  .snake-over .card{ max-width:360px; width:100%; }
+  .snake-toast{ position:absolute; top:0.6rem; left:50%; transform:translateX(-50%); z-index:5; background:var(--gold); color:var(--ink); border:2px solid var(--ink); border-radius:14px; box-shadow:var(--shadow-ink); padding:0.5rem 0.9rem; font-weight:700; font-size:0.9rem; text-align:center; width:max-content; max-width:90%; pointer-events:none; }
   .game-stage{ position:relative; width:100%; max-width:560px; margin:0 auto; border:2px solid var(--ink); border-radius:12px; overflow:hidden; background:var(--bg); }
   .game-canvas{ display:block; width:100%; height:100%; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; cursor:pointer; }
   .game-face{ position:absolute; aspect-ratio:1/1; transform:translate(-50%,-50%); border-radius:50%; border:2px solid var(--ink); background:#fff; overflow:hidden; pointer-events:none; z-index:2; }
@@ -192,7 +209,7 @@ const app = document.getElementById('app');
 // GitHub (bypassing every cache), reads the APP_VERSION inside it, and if it differs from the
 // one running, offers (or, on the sign-in/profile screens, just does) a reload. This matters most
 // for the iOS home-screen version, which otherwise keeps running an old cached copy.
-const APP_VERSION = '2026-11-10.2';
+const APP_VERSION = '2026-11-10.6';
 let latestSeenVersion = null, lastUpdateCheckAt = 0;
 function freshUrl(){ return location.origin + location.pathname + '?v=' + Date.now(); }
 async function fetchLatestVersion(){
@@ -949,7 +966,8 @@ function lavaLampHtml(){
 
 function render(){
   stopSevlingAnimations();
-  app.classList.toggle('page-wide', state.view==='arcade-snake');
+  app.classList.toggle('page-full', state.view==='arcade-snake');
+  document.body.classList.toggle('game-full', state.view==='arcade-snake');
   if(state.view==='login') renderLogin();
   else if(state.view==='profiles') renderProfiles();
   else if(state.view==='add-profile') renderAddProfile();
@@ -2168,20 +2186,31 @@ function c4PlayerMove(col){
 }
 
 // ---- Snake ----
+// The arena fills the whole screen in whatever shape it is. Squares are roughly the same size on
+// every device (about 26px on a phone, up to 44px on an iPad), so a bigger screen gets a bigger
+// arena with more room. The grid is fixed when a game starts; rotating mid-game just rescales it.
 function newSnake(){
-  return { size:12, snake:[{x:6,y:6},{x:5,y:6},{x:4,y:6}], dir:{x:1,y:0}, dirQueue:[], food:{x:9,y:6}, score:0, over:false, rewardGiven:false, wonItemName:null };
+  return { cols:0, rows:0, snake:[], dir:{x:1,y:0}, dirQueue:[], food:null, score:0, over:false, rewardGiven:false, wonItemName:null, rewardShownUntil:0 };
+}
+function snakeInitGrid(s, w, h){
+  const cell = Math.max(24, Math.min(44, Math.floor(Math.min(w, h)/14)));
+  s.cols = Math.max(8, Math.floor(w/cell)); s.rows = Math.max(8, Math.floor(h/cell));
+  const cx = Math.floor(s.cols/2) - 1, cy = Math.floor(s.rows/2);
+  s.snake = [{x:cx,y:cy},{x:cx-1,y:cy},{x:cx-2,y:cy}];
+  s.dir = {x:1,y:0}; s.dirQueue = [];
+  s.food = { x:Math.min(s.cols-1, cx+4), y:cy };
 }
 function snakeRandomFood(s){
   let pos;
-  do{ pos = { x:Math.floor(Math.random()*s.size), y:Math.floor(Math.random()*s.size) }; }
+  do{ pos = { x:Math.floor(Math.random()*s.cols), y:Math.floor(Math.random()*s.rows) }; }
   while(s.snake.some(seg=>seg.x===pos.x&&seg.y===pos.y));
   return pos;
 }
 function snakeTick(s){
-  if(s.over) return;
+  if(s.over || !s.cols) return;
   if(s.dirQueue.length) s.dir = s.dirQueue.shift();
   const head = { x: s.snake[0].x + s.dir.x, y: s.snake[0].y + s.dir.y };
-  if(head.x<0||head.x>=s.size||head.y<0||head.y>=s.size || s.snake.some(seg=>seg.x===head.x&&seg.y===head.y)){
+  if(head.x<0||head.x>=s.cols||head.y<0||head.y>=s.rows || s.snake.some(seg=>seg.x===head.x&&seg.y===head.y)){
     s.over = true; return;
   }
   s.snake.unshift(head);
@@ -2191,48 +2220,65 @@ function snakeTick(s){
 // Turns are queued (up to 3), so two quick taps such as "up then left" both happen on
 // consecutive moves instead of the second overwriting the first.
 function snakeSetDir(s,dx,dy){
-  if(!s || s.over) return;
+  if(!s || s.over) return false;
   const last = s.dirQueue.length ? s.dirQueue[s.dirQueue.length-1] : s.dir;
-  if((last.x===dx && last.y===dy) || (last.x===-dx && last.y===-dy)) return;
-  if(s.dirQueue.length < 3) s.dirQueue.push({x:dx,y:dy});
+  if((last.x===dx && last.y===dy) || (last.x===-dx && last.y===-dy)) return false;
+  if(s.dirQueue.length >= 3) return false;
+  s.dirQueue.push({x:dx,y:dy});
+  return true;
 }
 function snakeBoardHtml(s, headSevling){
-  const cellPct = 100/s.size;
-  let cellsHtml = '';
+  const cw = 100/s.cols, ch = 100/s.rows;
+  let html = '';
   s.snake.forEach((seg, i)=>{
-    const style = `position:absolute;left:${seg.x*cellPct}%;top:${seg.y*cellPct}%;width:${cellPct}%;height:${cellPct}%;box-sizing:border-box;padding:1px;${i===0?'z-index:2;':''}`;
+    const style = `position:absolute;left:${seg.x*cw}%;top:${seg.y*ch}%;width:${cw}%;height:${ch}%;box-sizing:border-box;padding:1px;${i===0?'z-index:2;':''}`;
     if(i===0){
       const headInner = headSevling ? sevlingIcon(headSevling,false,true) : `<div style="width:100%;height:100%;background:var(--correct);border-radius:4px;"></div>`;
-      cellsHtml += `<div style="${style}"><div style="position:absolute;left:50%;top:50%;width:145%;height:145%;transform:translate(-50%,-50%);border-radius:50%;border:3px solid var(--correct);overflow:hidden;box-sizing:border-box;background:#fff;">${headInner}</div></div>`;
+      html += `<div style="${style}"><div style="position:absolute;left:50%;top:50%;width:145%;height:145%;transform:translate(-50%,-50%);border-radius:50%;border:3px solid var(--correct);overflow:hidden;box-sizing:border-box;background:#fff;">${headInner}</div></div>`;
     }else{
-      cellsHtml += `<div style="${style}"><div style="width:100%;height:100%;background:var(--correct);opacity:0.7;border-radius:3px;"></div></div>`;
+      html += `<div style="${style}"><div style="width:100%;height:100%;background:var(--correct);opacity:0.75;border-radius:4px;"></div></div>`;
     }
   });
-  cellsHtml += `<div style="position:absolute;left:${s.food.x*cellPct}%;top:${s.food.y*cellPct}%;width:${cellPct}%;height:${cellPct}%;display:flex;align-items:center;justify-content:center;font-size:clamp(14px,4.5vmin,34px);">🍎</div>`;
-  return cellsHtml;
+  html += `<div style="position:absolute;left:${s.food.x*cw}%;top:${s.food.y*ch}%;width:${cw}%;height:${ch}%;display:flex;align-items:center;justify-content:center;font-size:calc(var(--cell) * 0.8);line-height:1;">🍎</div>`;
+  return html;
 }
-// Each move only redraws the board itself, so the arrow buttons are never replaced
-// mid-tap (rebuilding the whole screen every move was what made taps go missing).
+// Size the board to fill the arena. Squares stay square, so the board is centred and may leave a
+// sliver of space on one side, at most part of one square.
+function snakeSizeBoard(){
+  const s = state.snake, area = document.getElementById('snake-area'), board = document.getElementById('snake-board');
+  if(!s || !area || !board || !s.cols) return;
+  const cell = Math.min(area.clientWidth / s.cols, area.clientHeight / s.rows);
+  board.style.width = (cell*s.cols)+'px'; board.style.height = (cell*s.rows)+'px';
+  board.style.setProperty('--cell', cell+'px');
+}
+window.addEventListener('resize', ()=>{ if(state.view==='arcade-snake') snakeSizeBoard(); });
+// Each move only redraws the board itself, never the controls, so no tap is ever lost.
 function updateSnakeBoard(){
   const s = state.snake;
   const board = document.getElementById('snake-board');
-  if(!s || !board) return;
+  if(!s || !board || !s.cols) return;
   const headSevling = game.selectedSnakeSevling ? SEVLINGS.find(x=>x.id===game.selectedSnakeSevling) : null;
   board.innerHTML = snakeBoardHtml(s, headSevling);
   setTextIfChanged('snake-score', String(s.score));
+  const toast = document.getElementById('snake-toast');
+  if(toast && s.rewardShownUntil && Date.now() > s.rewardShownUntil){ toast.remove(); s.rewardShownUntil = 0; }
 }
 function startSnakeLoop(){
   if(snakeLoopInterval) return;
   snakeLoopInterval = setInterval(()=>{
     const s = state.snake;
     if(state.view!=='arcade-snake' || !s){ clearInterval(snakeLoopInterval); snakeLoopInterval = null; return; }
-    if(s.over){ clearInterval(snakeLoopInterval); snakeLoopInterval = null; render(); return; }
     snakeTick(s);
     if(s.over){ clearInterval(snakeLoopInterval); snakeLoopInterval = null; render(); return; }
     if(s.score>=10 && !s.rewardGiven){
       s.rewardGiven = true;
       const sevlingId = game.selectedSnakeSevling;
-      if(sevlingId) awardSevlingItem(sevlingId).then(itemName=>{ s.wonItemName = itemName; if(state.view==='arcade-snake' && state.snake===s) render(); });
+      if(sevlingId) awardSevlingItem(sevlingId).then(itemName=>{
+        s.wonItemName = itemName; s.rewardShownUntil = Date.now() + 4000;
+        const sev = SEVLINGS.find(x=>x.id===sevlingId);
+        const area = document.getElementById('snake-area');
+        if(area && state.snake===s) area.insertAdjacentHTML('beforeend', `<div class="snake-toast" id="snake-toast">🎁 You won ${escapeHtml(itemName)} for ${escapeHtml(sev?sev.name:'your Sevling')}! Happiness +15</div>`);
+      });
     }
     updateSnakeBoard();
   }, 190);
@@ -2243,54 +2289,70 @@ function renderSnakeGame(){
   const headId = game.selectedSnakeSevling;
   const headSevling = headId ? SEVLINGS.find(x=>x.id===headId) : null;
   const hasTime = (game.arcadeMs||0) > 0;
-  const arrow = (id, label, ch)=>`<button class="btn-secondary snake-btn" id="${id}" aria-label="${label}">${ch}</button>`;
+  const zone = (dir, arrow)=>`<div class="snake-zone snake-zone-${dir}" aria-hidden="true"><span>${arrow}</span></div>`;
   app.innerHTML = `
-    <button class="btn-ghost" id="btn-back-arcade">← Back to Arcade</button>
-    <h2 class="section-title">Snake</h2>
-    <p class="progress" style="text-align:center;">Score: <span id="snake-score">${s.score}</span> &nbsp;·&nbsp; Arcade time left: <span id="arcade-timer">${formatMs(game.arcadeMs||0)}</span></p>
-    ${s.wonItemName ? `<div class="card reward-card" style="border-top-color:var(--gold);"><p class="muted" style="text-align:center;margin:0;">🎁 You won ${escapeHtml(s.wonItemName)} for ${escapeHtml(headSevling?headSevling.name:'your Sevling')}! Happiness +15</p></div>` : ''}
-    ${(s.over) ? `<div class="card"><p class="muted" style="text-align:center;margin:0;">Game over! Final score: ${s.score}</p></div>` : ''}
-    ${(!hasTime) ? `<div class="card"><p class="muted" style="text-align:center;font-size:0.85rem;margin:0;">${s.over ? 'Out of arcade time, score 90%+ three times on a list to earn more!' : 'Your arcade time has run out, but you can finish this game.'}</p></div>` : ''}
-    <div class="snake-wrap">
-      <div id="snake-board" class="snake-board" aria-label="Snake board, swipe to steer">${snakeBoardHtml(s, headSevling)}</div>
-    </div>
-    <div class="snake-pad">
-      <div></div>${arrow('snake-up','Up','↑')}<div></div>
-      ${arrow('snake-left','Left','←')}<div></div>${arrow('snake-right','Right','→')}
-      <div></div>${arrow('snake-down','Down','↓')}<div></div>
-    </div>
-    <p class="muted" style="text-align:center;margin:0.5rem 0 0;">Tap the arrows or swipe on the board to steer.</p>
-    <div class="btn-row" style="margin-top:1rem;justify-content:center;">
-      <button class="btn-secondary" id="btn-snake-restart" ${hasTime?'':'disabled'}>New game</button>
+    <div class="snake-screen">
+      <div class="snake-bar">
+        <button class="btn-secondary snake-bar-btn" id="btn-back-arcade" aria-label="Back to Arcade">← Arcade</button>
+        <div class="snake-bar-info"><strong>Score <span id="snake-score">${s.score}</span></strong><span>⏱ <span id="arcade-timer">${formatMs(game.arcadeMs||0)}</span>${hasTime ? '' : ' (time up, finish this game)'}</span></div>
+        <button class="btn-secondary snake-bar-btn" id="btn-snake-restart" ${hasTime?'':'disabled'}>New game</button>
+      </div>
+      <div class="snake-area" id="snake-area">
+        <div id="snake-board" class="snake-board"></div>
+        ${s.over ? '' : `<div class="snake-zones">${zone('up','↑')}${zone('down','↓')}${zone('left','←')}${zone('right','→')}</div>`}
+        ${s.over ? `<div class="snake-over"><div class="card" style="text-align:center;margin:0;">
+          <div class="reward-name">Game over!</div>
+          <p class="muted" style="margin:0.3rem 0 0.9rem;">Final score: ${s.score}</p>
+          ${s.wonItemName ? `<p class="muted" style="margin:0 0 0.9rem;">🎁 You won ${escapeHtml(s.wonItemName)} for ${escapeHtml(headSevling?headSevling.name:'your Sevling')}! Happiness +15</p>` : ''}
+          ${hasTime ? '' : `<p class="muted" style="margin:0 0 0.9rem;font-size:0.85rem;">Out of arcade time, score 90%+ three times on a list to earn more!</p>`}
+          <div class="btn-row" style="justify-content:center;">
+            <button class="btn-primary" id="btn-snake-again" ${hasTime?'':'disabled'}>Play again</button>
+            <button class="btn-secondary" id="btn-snake-leave">Back to Arcade</button>
+          </div>
+        </div></div>` : ''}
+      </div>
     </div>
   `;
-  document.getElementById('btn-back-arcade').onclick = ()=>{ stopAllArcadeIntervals(); state.view='arcade'; render(); };
-  document.getElementById('btn-snake-restart').onclick = ()=>{ if((game.arcadeMs||0)<=0) return; stopAllArcadeIntervals(); state.snake = newSnake(); render(); };
-  // Arrow buttons respond the moment a finger touches them (pointerdown), not on release.
-  [['snake-up',0,-1],['snake-down',0,1],['snake-left',-1,0],['snake-right',1,0]].forEach(([id,dx,dy])=>{
-    const b = document.getElementById(id);
-    b.onpointerdown = (e)=>{ e.preventDefault(); snakeSetDir(state.snake,dx,dy); };
-    b.onclick = (e)=>e.preventDefault();
-    b.oncontextmenu = (e)=>e.preventDefault();
-  });
-  // Swipe anywhere on the board; a long drag can make several turns in one go.
-  const board = document.getElementById('snake-board');
-  let sx = null, sy = null;
-  board.onpointerdown = (e)=>{ e.preventDefault(); try{ board.setPointerCapture(e.pointerId); }catch(_){} sx = e.clientX; sy = e.clientY; };
-  board.onpointermove = (e)=>{
+  const leave = ()=>{ stopAllArcadeIntervals(); state.view='arcade'; render(); };
+  const restart = ()=>{ if((game.arcadeMs||0)<=0) return; stopAllArcadeIntervals(); state.snake = newSnake(); render(); };
+  document.getElementById('btn-back-arcade').onclick = leave;
+  document.getElementById('btn-snake-restart').onclick = restart;
+  const again = document.getElementById('btn-snake-again'); if(again) again.onclick = restart;
+  const leaveBtn = document.getElementById('btn-snake-leave'); if(leaveBtn) leaveBtn.onclick = leave;
+  // Fit a fresh grid to this screen on a new game, then size the board to fill the arena.
+  const area = document.getElementById('snake-area');
+  if(!s.cols) snakeInitGrid(s, area.clientWidth, area.clientHeight);
+  updateSnakeBoard();
+  snakeSizeBoard();
+  if(s.over){ stopAllArcadeIntervals(); return; }
+  // Controls: tap anywhere in one of the four big triangles (split along the arena's diagonals)
+  // to turn that way, the moment the finger touches. Or swipe anywhere; a swipe overrides the
+  // tap it started with, and a long drag can make several turns.
+  let sx = null, sy = null, tentative = null;
+  area.onpointerdown = (e)=>{
+    if(e.target.closest('.snake-over')) return;
+    e.preventDefault(); try{ area.setPointerCapture(e.pointerId); }catch(_){}
+    const r = area.getBoundingClientRect();
+    const nx = (e.clientX - r.left)/r.width - 0.5, ny = (e.clientY - r.top)/r.height - 0.5;
+    const d = Math.abs(nx) > Math.abs(ny) ? [nx>0?1:-1, 0] : [0, ny>0?1:-1];
+    tentative = snakeSetDir(state.snake, d[0], d[1]) ? state.snake.dirQueue[state.snake.dirQueue.length-1] : null;
+    const z = area.querySelector(`.snake-zone-${d[0]===1?'right':d[0]===-1?'left':d[1]===1?'down':'up'}`);
+    if(z){ z.classList.add('flash'); setTimeout(()=>z.classList.remove('flash'), 160); }
+    sx = e.clientX; sy = e.clientY;
+  };
+  area.onpointermove = (e)=>{
     if(sx===null) return;
     const dx = e.clientX - sx, dy = e.clientY - sy;
     if(Math.max(Math.abs(dx), Math.abs(dy)) < 22) return;
+    const q = state.snake.dirQueue;
+    if(tentative){ const i = q.indexOf(tentative); if(i>-1) q.splice(i,1); tentative = null; }
     if(Math.abs(dx) > Math.abs(dy)) snakeSetDir(state.snake, dx>0?1:-1, 0); else snakeSetDir(state.snake, 0, dy>0?1:-1);
     sx = e.clientX; sy = e.clientY;
   };
-  board.onpointerup = board.onpointercancel = board.onlostpointercapture = ()=>{ sx = null; sy = null; };
-  if(!s.over){
-    startSnakeLoop();
-    if(hasTime) startArcadeCountdown(()=>render());
-  }else{
-    stopAllArcadeIntervals();
-  }
+  area.onpointerup = area.onpointercancel = area.onlostpointercapture = ()=>{ sx = null; sy = null; tentative = null; };
+  area.oncontextmenu = (e)=>e.preventDefault();
+  startSnakeLoop();
+  if(hasTime) startArcadeCountdown(()=>render());
 }
 
 // ---- Maze Munch ----
@@ -3683,7 +3745,15 @@ const SP_REWARD_KILLS = 30;       // aliens blasted in one game for the Sevling'
 const SP_LASER_COOLDOWN = 0.28;
 const SP_MAX_BOLTS = 4;
 const SP_ROCKET_RADIUS = 95;      // blast radius of a rocket (a laser only hits what it touches)
-const SP_ENEMY_SHOT_SPEED = 165;
+const SP_ENEMY_SHOT_SPEED = 170;
+// Enemy fire (made more aggressive from wave 1 at Harry's request, v2026-11-10.4):
+const SP_FORMATION_FIRE_EVERY = 1.8; // seconds between shots from the formation in wave 1 (shorter each wave)
+const SP_MAX_ENEMY_SHOTS = 10;       // cap on enemy shots on screen at once
+// No sitting still: if the ship hasn't moved about a ship's width for this long, the aliens start
+// firing precisely aimed shots straight at it, so staying put gets you hit within 10 seconds.
+const SP_STILL_MOVE = 30;          // px the ship must move to count as "moved"
+const SP_STILL_HIT_AT = 9.6;       // an aimed shot is timed to land after this many seconds parked
+const SP_STILL_FIRE_EVERY = 0.7;   // then a follow-up shot this often while the ship stays put
 const SP_COL_X = (col)=>SP_W/2 + (col-3.5)*52;
 const SP_ROW_Y = (row)=>80 + row*48;
 const SP_ALIEN_TYPES = {
@@ -3732,15 +3802,16 @@ function spBuildWave(s){
   });
   s.aliens = aliens;
   s.diveTimer = 2.5;
+  s.fireTimer = 2.5;
 }
 function newShooter(pool){
   const s = {
     pool: shuffle(pool), poolIdx:0, prompt:null, questions:0, correct:0,
     time:0, wave:1, score:0, kills:0, lives:SP_LIVES, rockets:0,
-    player:{ x:SP_W/2, y:SP_H-54, targetX:SP_W/2, cooldown:0, dead:false, respawnT:0, invuln:2 },
+    player:{ x:SP_W/2, y:SP_H-54, targetX:SP_W/2, cooldown:0, dead:false, respawnT:0, invuln:2, anchorX:SP_W/2, stillT:0, campTimer:0 },
     firing:false, bolts:[], rocketsInFlight:[], enemyShots:[], particles:[], booms:[], aliens:[],
     stars: Array.from({length:46}, ()=>({ x:Math.random()*SP_W, y:Math.random()*SP_H, sp:12+Math.random()*34, size:1.5+Math.random()*3, tw:Math.random()*6, col: Math.random()<0.7 ? '#FFFFFF' : [FOIL.pink,FOIL.blue,FOIL.gold,FOIL.lime][Math.floor(Math.random()*4)] })),
-    sincePrompt:0, diveTimer:2.5, waveClearT:0, overT:0, over:false,
+    sincePrompt:0, diveTimer:2.5, fireTimer:2.5, waveClearT:0, overT:0, over:false,
     banner:'Wave 1', bannerUntil:2, rewardGiven:false, wonItemName:null, needsRender:false
   };
   spBuildWave(s);
@@ -3794,7 +3865,7 @@ function spStartDive(s){
   const weighted = ready.flatMap(a=>Array(a.row+1).fill(a));
   const a = weighted[Math.floor(Math.random()*weighted.length)];
   const side = a.x < SP_W/2 ? -1 : 1, px = s.player.x;
-  a.state = 'diving'; a.shot = false; a.wpi = 0;
+  a.state = 'diving'; a.shot = false; a.shot2 = false; a.wpi = 0;
   a.wps = [
     { x:a.x + side*30, y:a.y - 34 }, { x:a.x + side*62, y:a.y - 8 }, { x:a.x + side*48, y:a.y + 40 },
     { x:Math.max(40, Math.min(SP_W-40, px - side*70)), y:SP_H*0.5 },
@@ -3834,6 +3905,14 @@ function spStep(s, dt){
     p.x += (p.targetX - p.x) * Math.min(1, dt*(keyDir ? 8 : 14));
     p.x = Math.max(30, Math.min(SP_W-30, p.x));
     if(p.invuln>0) p.invuln -= dt;
+    // How long has the ship been parked in roughly the same spot? A move of a ship's width or
+    // more resets the clock, and the new "parked" spot is wherever the ship comes to rest.
+    if(Math.abs(p.x - p.anchorX) > SP_STILL_MOVE){ p.stillT = 0; p.settling = true; }
+    if(p.settling){
+      p.stillT = 0;
+      if(Math.abs(p.x - (p.prevX==null ? p.x : p.prevX)) < 0.3){ p.anchorX = p.x; p.settling = false; }
+    }else p.stillT += dt;
+    p.prevX = p.x;
     p.cooldown -= dt;
     if((s.firing || heldKeys[' ']) && p.cooldown<=0 && s.bolts.length < SP_MAX_BOLTS){
       p.cooldown = SP_LASER_COOLDOWN;
@@ -3842,7 +3921,7 @@ function spStep(s, dt){
     }
   }else{
     p.respawnT -= dt;
-    if(p.respawnT<=0){ p.dead = false; p.invuln = 2.5; p.x = SP_W/2; p.targetX = SP_W/2; }
+    if(p.respawnT<=0){ p.dead = false; p.invuln = 2.5; p.x = SP_W/2; p.targetX = SP_W/2; p.anchorX = p.x; p.prevX = p.x; p.settling = false; p.stillT = 0; }
   }
 
   // Lasers
@@ -3885,18 +3964,45 @@ function spStep(s, dt){
     }else{
       if(spMoveAlong(a, spSlotPos(s, a), speed*0.9, dt) && Math.hypot(a.x-spSlotPos(s,a).x, a.y-spSlotPos(s,a).y) < 3) a.state = 'formation';
     }
-    // Diving aliens may drop one slow shot as they pass halfway down
-    if(a.state==='diving' && !a.shot && a.y > SP_H*0.36 && a.vy > 0){
-      a.shot = true;
-      if(Math.random() < 0.5 + Math.min(0.3, (s.wave-1)*0.08)){
-        const dx = p.x - a.x, dy = p.y - a.y, d = Math.hypot(dx,dy) || 1;
-        const vx = dx/d*SP_ENEMY_SHOT_SPEED*0.45, vy = SP_ENEMY_SHOT_SPEED;
-        s.enemyShots.push({ x:a.x, y:a.y+10, vx, vy });
-      }
-    }
+    // Diving aliens always fire on the way down, and often fire a second shot lower down
+    if(a.state==='diving' && a.vy > 0 && !a.shot && a.y > SP_H*0.28){ a.shot = true; spEnemyFire(s, a, 0.5); }
+    if(a.state==='diving' && a.vy > 0 && !a.shot2 && a.y > SP_H*0.5){ a.shot2 = true; if(Math.random() < 0.35 + Math.min(0.35, (s.wave-1)*0.07)) spEnemyFire(s, a, 0.4); }
     // A diving alien that touches the ship
     if(!p.dead && p.invuln<=0 && a.state==='diving' && Math.hypot(a.x-p.x, a.y-p.y) < a.r + 10){ spKill(s, a); spPlayerHit(s); }
   });
+  // The whole formation fires too, back rows included (their shots pass between the aliens in
+  // front), about once a second in wave 1 and more often each wave, sometimes two at once. Shots
+  // are aimed at where the ship is, and start high up, so they can be seen coming and dodged,
+  // but only by moving.
+  if(!p.dead && s.waveClearT<=0){
+    s.fireTimer -= dt;
+    if(s.fireTimer<=0){
+      s.fireTimer = Math.max(0.5, SP_FORMATION_FIRE_EVERY - 0.08*(s.wave-1)) * (0.6 + Math.random()*0.8);
+      const ranks = s.aliens.filter(a=>!a.dead && a.state==='formation');
+      if(ranks.length){
+        ranks.sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x));
+        const near = ranks.slice(0, Math.min(ranks.length, 6));
+        const volley = Math.random() < 0.15 + Math.min(0.3, (s.wave-1)*0.06) ? 2 : 1;
+        shuffle(near).slice(0, volley).forEach(a=>spEnemyFire(s, a, 0.35));
+      }
+    }
+  }
+  // A parked ship gets precisely aimed shots from the alien above it nearest in line
+  if(!p.dead && p.stillT > SP_STILL_HIT_AT - 3 && s.waveClearT<=0){
+    p.campTimer -= dt;
+    if(p.campTimer<=0){
+      const shooters = s.aliens.filter(a=>!a.dead && (a.state==='formation' || a.state==='diving' || a.state==='returning' || a.state==='entering') && a.y > 0 && a.y < p.y - 120);
+      if(shooters.length){
+        shooters.sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x));
+        const a = shooters[0];
+        // launch so the shot arrives at SP_STILL_HIT_AT seconds of standing still
+        const travel = (p.y - (a.y + a.r*0.6)) / spEnemyShotSpeed(s, 'exact');
+        if(p.stillT + travel >= SP_STILL_HIT_AT){ spEnemyFire(s, a, 'exact'); p.campTimer = SP_STILL_FIRE_EVERY; }
+      }
+    }
+  }else{
+    p.campTimer = 0;
+  }
   // Swoops start once everyone has arrived
   const arriving = s.aliens.some(a=>!a.dead && (a.state==='waiting' || a.state==='entering'));
   if(!arriving && s.waveClearT<=0){
@@ -3906,7 +4012,7 @@ function spStep(s, dt){
   // Enemy shots
   s.enemyShots.forEach(b=>{
     b.x += b.vx*dt; b.y += b.vy*dt;
-    if(!p.dead && p.invuln<=0 && Math.abs(b.x-p.x) < 12 && Math.abs(b.y-(p.y+2)) < 15){ b.dead = true; spPlayerHit(s); }
+    if(!p.dead && p.invuln<=0 && Math.abs(b.x-p.x) < 12 && Math.abs(b.y-(p.y+2)) < 15){ b.dead = true; if(b.exact) s.parkedHits = (s.parkedHits||0) + 1; spPlayerHit(s); }
     if(b.y > SP_H+10) b.dead = true;
   });
   s.enemyShots = s.enemyShots.filter(b=>!b.dead);
@@ -3925,6 +4031,18 @@ function spStep(s, dt){
     s.sincePrompt += dt;
     if(s.sincePrompt >= SP_PROMPT_EVERY) spOpenPrompt(s);
   }
+}
+// Aimed shots at a parked ship are faster (1.6x), so they can't be dodged at the last moment.
+function spEnemyShotSpeed(s, aim){ return SP_ENEMY_SHOT_SPEED * Math.min(1.25, 1 + 0.04*(s.wave-1)) * (aim==='exact' ? 1.6 : 1); }
+function spEnemyFire(s, a, aim){
+  if(s.enemyShots.length >= SP_MAX_ENEMY_SHOTS && aim!=='exact') return;
+  const p = s.player;
+  const speed = spEnemyShotSpeed(s, aim);
+  const sy = a.y + a.r*0.6;
+  const dx = p.x - a.x, dy = Math.max(40, p.y - sy), d = Math.hypot(dx,dy) || 1;
+  // 'exact' lands right on the ship's current spot; otherwise only loosely aimed
+  const vx = aim==='exact' ? Math.max(-speed*0.9, Math.min(speed*0.9, dx / (dy/speed))) : dx/d*speed*aim;
+  s.enemyShots.push({ x:a.x, y:sy, vx, vy: speed, exact: aim==='exact' });
 }
 function spPlayerHit(s){
   const p = s.player;
