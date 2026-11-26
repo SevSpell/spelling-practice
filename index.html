@@ -153,6 +153,25 @@
   .sevling-bio p{ display:flex; gap:0.5rem; margin:0.3rem 0; font-size:0.92rem; line-height:1.4; }
   .profile-portrait{ position:relative; width:max-content; margin:0.3rem auto 0.2rem; }
   .profile-portrait .sevling-icon{ width:min(15rem, 64vw); height:min(15rem, 64vw); margin:0 auto; }
+  /* Sevling profile scenes: the Sevling moves about in a little world for its collection */
+  .sev-scene{ position:relative; width:100%; height:270px; border:2px solid var(--ink); border-radius:16px; overflow:hidden; margin:0 0 0.6rem; box-shadow:3px 3px 0 var(--ink); }
+  .sev-scene .deco{ position:absolute; pointer-events:none; line-height:1; }
+  .sev-scene .scene-shadow{ position:absolute; height:14px; border-radius:50%; background:rgba(34,26,61,0.22); filter:blur(2px); pointer-events:none; }
+  .sev-scene .scene-sprite{ position:absolute; transform-origin:50% 100%; will-change:transform; }
+  .sev-scene .scene-sprite img, .sev-scene .scene-sprite svg{ width:100%; height:100%; display:block; object-fit:contain; }
+  .sev-scene .scene-puff{ position:absolute; width:12px; height:12px; border-radius:50%; background:rgba(255,255,255,0.85); pointer-events:none; }
+  .sev-scene .scene-bubble{ position:absolute; border-radius:50%; border:2px solid rgba(255,255,255,0.8); background:rgba(255,255,255,0.15); pointer-events:none; }
+  .scene-farm{ background:linear-gradient(#CDEBFF 0%, #EAF6FF 56%, #BFE7A0 56.2%, #9ED67E 100%); }
+  .scene-farm .sun{ top:14px; right:22px; width:46px; height:46px; border-radius:50%; background:#FFD447; box-shadow:0 0 26px #FFE58A; }
+  .scene-farm .cloud{ height:18px; border-radius:18px; background:#fff; opacity:0.9; }
+  .scene-farm .fence{ left:0; right:0; top:46%; height:26px; background:repeating-linear-gradient(90deg, transparent 0 34px, #C9935F 34px 40px), linear-gradient(transparent 6px, #D9A679 6px 10px, transparent 10px 16px, #D9A679 16px 20px, transparent 20px); opacity:0.85; }
+  .scene-jungle{ background:linear-gradient(#BFF0C8 0%, #E3FAD8 50%, #7CC57A 50.2%, #4E9A57 100%); }
+  .scene-sea{ background:linear-gradient(#9BE7FF 0%, #3FA9E0 45%, #1F6FB8 82%, #F3D9A0 82.2%, #E8C788 100%); }
+  .scene-sea .ray{ top:-20px; width:46px; height:230px; background:linear-gradient(rgba(255,255,255,0.35), rgba(255,255,255,0)); transform:skewX(-14deg); }
+  .scene-pets{ background:linear-gradient(#FFF0F7 0%, #FFE3F0 52%, #E8C9A0 52.2%, #D9B486 100%); }
+  .scene-pets .window{ top:20px; left:24px; width:84px; height:64px; border:4px solid #fff; border-radius:8px; background:linear-gradient(#BDE9FF, #E6F7FF); box-shadow:inset 0 0 0 2px rgba(34,26,61,0.15); }
+  .scene-pets .window::after{ content:''; position:absolute; left:50%; top:0; bottom:0; width:4px; margin-left:-2px; background:#fff; }
+  .scene-pets .rug{ left:50%; bottom:14px; width:62%; height:40px; margin-left:-31%; border-radius:50%; background:repeating-radial-gradient(ellipse, #FF8AC6 0 6px, #FFB3D9 6px 12px); opacity:0.75; }
   .sevling-joke{ text-align:left; background:#FFF9E0; border:2px solid var(--ink); border-radius:12px; padding:0.7rem 0.9rem; margin:0.4rem 0 0.8rem; }
   .sevling-joke h3{ margin:0 0 0.4rem; font-size:1.1rem; }
   .sevling-joke p{ margin:0.3rem 0; font-size:0.95rem; line-height:1.4; }
@@ -240,7 +259,7 @@ const app = document.getElementById('app');
 // GitHub (bypassing every cache), reads the APP_VERSION inside it, and if it differs from the
 // one running, offers (or, on the sign-in/profile screens, just does) a reload. This matters most
 // for the iOS home-screen version, which otherwise keeps running an old cached copy.
-const APP_VERSION = '2026-11-26.4';
+const APP_VERSION = '2026-11-26.5';
 let latestSeenVersion = null, lastUpdateCheckAt = 0;
 function freshUrl(){ return location.origin + location.pathname + '?v=' + Date.now(); }
 async function fetchLatestVersion(){
@@ -2061,6 +2080,107 @@ function accessoryTile(a, care){
   const action = owned ? `<div class="item-owned">Worn</div>` : `<button class="btn-primary item-btn" data-accessory="${a.id}" ${game.balance<a.price?'disabled':''}>Buy \u00A3${a.price}</button>`;
   return `<div class="shop-item"><div class="item-emoji">${a.emoji}</div><div class="item-name">${escapeHtml(a.name)}</div>${action}</div>`;
 }
+// ---------- Sevling profile scenes ----------
+// On a Sevling's profile page it moves about in a little world for its collection: farm animals
+// (and jungle) wander about a meadow, sea creatures swim and drift under water with bubbles, pets
+// pad about a cosy playroom with a bouncier step and the odd happy hop. Uses the same three
+// pictures (eyes open, blink, smile), moved with code. The loop stops by itself as soon as the
+// scene leaves the page (any re-render replaces it), and calms to a gentle sway for anyone who
+// has asked their device to reduce motion.
+function sevlingSceneHtml(s){
+  const c = ['farm','sea','pets','jungle'].includes(s.collection) ? s.collection : 'farm';
+  const d = (st, cls, txt) => `<div class="deco ${cls||''}" style="${st}">${txt||''}</div>`;
+  let deco = '';
+  if(c==='farm') deco = d('','sun') + d('top:34px;left:8%;width:80px;','cloud') + d('top:62px;left:52%;width:62px;','cloud') + d('','fence')
+    + d('left:6%;top:80%;font-size:18px;','','🌼') + d('left:38%;top:90%;font-size:18px;','','🌷') + d('left:70%;top:82%;font-size:18px;','','🌼') + d('left:89%;top:91%;font-size:18px;','','🥕');
+  else if(c==='jungle') deco = d('left:-6px;top:-8px;font-size:58px;','','🌴') + d('right:-4px;top:4px;font-size:52px;','','🌿') + d('left:20%;top:6px;font-size:30px;','','🍃')
+    + d('left:60%;top:16px;font-size:26px;','','🦋') + d('left:8%;top:82%;font-size:20px;','','🍌') + d('left:80%;top:84%;font-size:20px;','','🌺');
+  else if(c==='sea') deco = d('left:12%;','ray') + d('left:46%;opacity:0.7;','ray') + d('left:78%;','ray')
+    + d('left:3%;bottom:6px;font-size:40px;','','🌿') + d('right:4%;bottom:4px;font-size:44px;','','🪸') + d('left:30%;bottom:6px;font-size:18px;','','🐚') + d('left:62%;bottom:8px;font-size:16px;','','⭐');
+  else deco = d('','window') + d('','rug') + d('right:6%;top:58%;font-size:34px;','','🪴') + d('left:6%;top:78%;font-size:24px;','','🧸') + d('left:76%;top:86%;font-size:20px;','','⚽') + d('left:44%;top:22px;font-size:20px;','','🖼️');
+  return `<div class="sev-scene scene-${c}" id="sev-scene" aria-label="${escapeHtml(s.name)} playing">${deco}<div class="scene-shadow"></div><div class="scene-sprite">${s.image ? `<img alt="${escapeHtml(s.name)}" src="${s.image}">` : sevlingIcon(s, false, false, true)}</div></div>`;
+}
+function startSevlingScene(s, care){
+  const scene = document.getElementById('sev-scene');
+  if(!scene) return;
+  const sprite = scene.querySelector('.scene-sprite'), shadow = scene.querySelector('.scene-shadow'), img = sprite.querySelector('img');
+  const kind = s.collection==='sea' ? 'swim' : s.collection==='pets' ? 'pad' : 'wander';
+  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const cheerful = (care.happiness||0) >= 60 && !sevlingHasNeeds(care);
+  const frames = { n: s.image, b: s.imageBlink || s.image, h: (cheerful && s.imageHappy) || s.image };
+  let faceKey = 'n', nextBlink = performance.now() + 1500, blinkEnd = 0;
+  let W = scene.clientWidth, H = scene.clientHeight;
+  const size = W < 480 ? 130 : 160;
+  sprite.style.width = size+'px'; sprite.style.height = size+'px';
+  // sea creatures move in 2D through the water; land animals walk along the ground with a little depth
+  let x = W/2, y = kind==='swim' ? H*0.35 : 0, dir = 1, target = null, pauseUntil = performance.now() + 900, hopUntil = 0, lastPuff = 0, nextBubble = 0;
+  const t0 = performance.now();
+  function puff(px, py){
+    const p = document.createElement('div'); p.className = 'scene-puff'; scene.appendChild(p);
+    const dx = (Math.random()-0.5)*26, start = performance.now();
+    p.style.left = px+'px'; p.style.top = py+'px';
+    (function step(){ const k = (performance.now()-start)/500; if(k>=1 || !p.isConnected){ p.remove(); return; }
+      p.style.transform = `translate(${dx*k}px,${-12*k}px) scale(${1+k})`; p.style.opacity = 1-k; requestAnimationFrame(step); })();
+  }
+  function bubble(px, py){
+    const b = document.createElement('div'); b.className = 'scene-bubble'; const r = 6 + Math.random()*8;
+    b.style.width = b.style.height = r+'px'; b.style.left = px+'px'; b.style.top = py+'px'; scene.appendChild(b);
+    const start = performance.now(), drift = (Math.random()-0.5)*20;
+    (function step(){ const k = (performance.now()-start)/2200; if(k>=1 || !b.isConnected){ b.remove(); return; }
+      b.style.transform = `translate(${Math.sin(k*9)*4 + drift*k}px,${-k*(py+20)}px)`; b.style.opacity = 1-k*0.7; requestAnimationFrame(step); })();
+  }
+  function tick(now){
+    if(!scene.isConnected) return; // the page moved on, stop
+    W = scene.clientWidth; H = scene.clientHeight;
+    const t = (now - t0)/1000, ground = H - 18;
+    let lift = 0, tilt = 0, sx = 1, sy = 1, scale = 1, moving = false;
+    if(reduce){
+      sy = 1 + Math.sin(t*2)*0.02; tilt = Math.sin(t*0.9)*2;
+    } else if(kind==='swim'){
+      if(!target && now > pauseUntil) target = { x: size/2 + Math.random()*(W-size), y: 10 + Math.random()*(H*0.82 - size - 20) };
+      if(target){
+        const dx = target.x-x, dy = target.y-y, dist = Math.hypot(dx,dy);
+        if(dist < 3){ target = null; pauseUntil = now + 900 + Math.random()*1400; blinkEnd = now + 200; }
+        else { const sp = Math.min(1.5, 0.4 + dist/90); x += dx/dist*sp; y += dy/dist*sp*0.8; dir = dx>0 ? 1 : -1; moving = true; }
+      }
+      lift = Math.sin(t*2.2)*6; tilt = moving ? dir*8 + Math.sin(t*5)*3 : Math.sin(t*1.6)*4;
+      if(now > nextBubble){ nextBubble = now + 500 + Math.random()*900; bubble(x + dir*size*0.25, y + size*0.3); }
+    } else {
+      if(!target && now > pauseUntil) target = { x: size/2 + 10 + Math.random()*(W-size-20), y: Math.random()*46 };
+      if(target){
+        const dx = target.x-x, dy = target.y-y, dist = Math.hypot(dx,dy);
+        if(dist < 3){
+          target = null; pauseUntil = now + 1300 + Math.random()*1300; blinkEnd = now + 200;
+          if(kind==='pad' && Math.random() < 0.5) hopUntil = now + 1100; // pets sometimes do a happy hop when they stop
+        } else { x += dx/dist*1.4; y += dy/dist*0.6; dir = dx>0 ? 1 : -1; moving = true; }
+      }
+      if(moving){
+        const fast = kind==='pad' ? 9 : 7, high = kind==='pad' ? 16 : 12;
+        lift = Math.abs(Math.sin(t*fast))*high; tilt = dir*5;
+        if(Math.abs(Math.sin(t*fast)) < 0.12 && now-lastPuff > 260){ lastPuff = now; puff(x - dir*size*0.25, ground - y - 6); }
+      } else if(now < hopUntil){
+        const ph = 1 - (hopUntil-now)/1100; lift = Math.abs(Math.sin(ph*Math.PI*2))*34; if(lift < 3){ sy = 0.92; sx = 1.06; }
+      } else { tilt = Math.sin(t*1.5)*3; sy = 1 + Math.sin(t*2)*0.015; }
+      scale = 1 - y/260;
+    }
+    // face: smile when happy (plain otherwise), with a blink every few seconds
+    if(now > nextBlink){ blinkEnd = now + 180; nextBlink = now + 1800 + Math.random()*2400; }
+    const want = now < blinkEnd ? 'b' : ((moving || now < hopUntil || kind==='swim') ? 'h' : (Math.sin(t*0.5) < 0 ? 'n' : 'h'));
+    if(img && want !== faceKey){ faceKey = want; img.src = frames[want]; }
+    const sz = size*scale;
+    const top = kind==='swim' ? y : ground - y - sz;
+    sprite.style.left = (x - size/2)+'px'; sprite.style.top = (top - (size-sz))+'px';
+    sprite.style.transform = `translateY(${-lift}px) rotate(${tilt}deg) scale(${dir*sx*scale},${sy*scale})`;
+    if(kind==='swim'){ shadow.style.display = 'none'; }
+    else {
+      const sh = Math.max(0.45, 1 - lift/90)*scale;
+      shadow.style.width = (size*0.62*sh)+'px'; shadow.style.left = (x - size*0.31*sh)+'px'; shadow.style.top = (ground - y - 8)+'px'; shadow.style.opacity = sh;
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
 // A won Sevling's own profile: a big animated picture, its "About me" and a joke.
 // Tapping a won Sevling on the Sevlings page opens this; "Look after" goes on to the care shop.
 function renderSevlingProfile(){
@@ -2074,7 +2194,7 @@ function renderSevlingProfile(){
   app.innerHTML = `
     <button class="btn-ghost" id="btn-back-sevlings">← Back to Sevlings</button>
     <div class="card" style="text-align:center;">
-      <div class="profile-portrait"><div class="sevling-icon">${sevlingIcon(s, false)}</div></div>
+      ${s.image ? sevlingSceneHtml(s) : `<div class="profile-portrait"><div class="sevling-icon">${sevlingIcon(s, false)}</div></div>`}
       ${hatchingNoteHtml(s)}
       ${wornEmoji ? `<div class="sevling-worn-badges" style="font-size:1.3rem;">${wornEmoji}</div>` : ''}
       <h2 class="section-title" style="text-align:center;margin-bottom:0.2rem;">${escapeHtml(s.name)}</h2>
@@ -2101,6 +2221,7 @@ function renderSevlingProfile(){
   if(mk) mk.onclick = async ()=>{ await updateCurrentProfile({ avatarSevling: s.id }); render(); };
   document.getElementById('btn-back-sevlings').onclick = ()=>{ state.view='sevlings'; render(); };
   document.getElementById('btn-look-after').onclick = ()=>{ state.view='sevling-care'; render(); };
+  if(s.image) startSevlingScene(s, care);
   const jr = document.getElementById('btn-joke-reveal');
   if(jr) jr.onclick = ()=>{ state.jokeRevealed = true; render(); };
 }
