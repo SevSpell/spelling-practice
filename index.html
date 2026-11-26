@@ -261,7 +261,7 @@ const app = document.getElementById('app');
 // GitHub (bypassing every cache), reads the APP_VERSION inside it, and if it differs from the
 // one running, offers (or, on the sign-in/profile screens, just does) a reload. This matters most
 // for the iOS home-screen version, which otherwise keeps running an old cached copy.
-const APP_VERSION = '2026-11-26.8';
+const APP_VERSION = '2026-11-26.9';
 let latestSeenVersion = null, lastUpdateCheckAt = 0;
 function freshUrl(){ return location.origin + location.pathname + '?v=' + Date.now(); }
 async function fetchLatestVersion(){
@@ -2167,6 +2167,55 @@ function renderTrophies(){
   `;
   document.getElementById('btn-back-trophies').onclick = ()=>{ state.view='home'; render(); };
 }
+// "Browse backgrounds" on the Sevlings page: for every group the child has won at least one Sevling
+// in, a small preview of each background. "Use for all" moves every Sevling in that group to it
+// (each can still be changed one by one on its own page); buying one there unlocks it for the
+// whole group, moves them all to it and, as with any spending, cleans up their poos.
+function wonSevlingsIn(collection){ return SEVLINGS.filter(x=>x.collection===collection && (game.unlockedSevlings||[]).includes(x.id)); }
+function browseScenesHtml(){
+  const groups = COLLECTIONS.filter(([id])=>wonSevlingsIn(id).length);
+  if(!groups.length) return `<div class="card"><p class="muted" style="margin:0;text-align:center;">Win a Sevling to start collecting backgrounds!</p></div>`;
+  return `<div class="card scene-picker">
+    <p class="muted" style="margin:0 0 0.6rem;font-size:0.88rem;">Each group has a free background, and new ones cost £${SCENE_PRICE} each. A background you buy works for every Sevling in that group, and you can switch whenever you like.</p>
+    ${groups.map(([cid,label])=>{
+      const sevs = wonSevlingsIn(cid);
+      return `<h3 style="margin:0.8rem 0 0.4rem;">${escapeHtml(label)}</h3>
+      <div class="scene-picker-grid">${sceneDefsFor(cid).map(d=>{
+        const owned = sceneOwned(cid, d.id);
+        const users = sevs.filter(x=>sevlingSceneId(x, game.sevlingCare[x.id]||{})===d.id);
+        const all = users.length===sevs.length;
+        const usedLine = users.length ? `<div class="muted" style="font-size:0.75rem;margin-bottom:0.25rem;">${all && sevs.length>1 ? 'Everyone here' : users.map(x=>escapeHtml(x.name)).join(', ')}</div>` : '';
+        const btn = !owned
+          ? (game.balance >= SCENE_PRICE ? `<button class="btn-primary" data-browse-buy="${d.id}" data-col="${cid}">Buy £${SCENE_PRICE}</button>` : `<button class="btn-ghost" disabled>Need £${SCENE_PRICE - game.balance} more</button>`)
+          : all ? `<button class="btn-ghost" disabled>✓ In use</button>`
+          : `<button class="btn-primary" data-browse-use="${d.id}" data-col="${cid}">${sevs.length>1 ? 'Use for all' : 'Use'}</button>`;
+        return `<div class="scene-choice${users.length?' current':''}"><div class="scene-thumb"><div class="sev-scene" style="background:${d.bg};">${d.deco()}</div></div>
+          <div class="scene-name">${escapeHtml(d.name)}${!owned ? ' 🔒' : ''}</div>${usedLine}${btn}</div>`;
+      }).join('')}</div>`;
+    }).join('')}
+  </div>`;
+}
+function wireBrowseScenes(){
+  if(!state.browseScenesOpen) return;
+  fitSceneThumbs(); setTimeout(fitSceneThumbs, 50);
+  const moveAll = (cid, id) => wonSevlingsIn(cid).forEach(x=>{ const c = game.sevlingCare[x.id] || (game.sevlingCare[x.id] = { happiness:50, accessories:[] }); c.scene = id; });
+  document.querySelectorAll('[data-browse-use]').forEach(b=>{
+    b.onclick = async ()=>{ const cid = b.dataset.col, id = b.dataset.browseUse; moveAll(cid, id);
+      state.browseMessage = `Your ${collectionLabel(cid)} Sevlings have moved to the ${sceneDef(cid, id).name}!`; await saveGame(); render(); };
+  });
+  document.querySelectorAll('[data-browse-buy]').forEach(b=>{
+    b.onclick = async ()=>{
+      const cid = b.dataset.col, id = b.dataset.browseBuy;
+      if(game.balance < SCENE_PRICE || sceneOwned(cid, id)) return;
+      game.balance -= SCENE_PRICE;
+      game.ownedScenes = (game.ownedScenes||[]).concat(id);
+      moveAll(cid, id);
+      wonSevlingsIn(cid).forEach(x=>{ const c = game.sevlingCare[x.id]; if(c) c.poops = 0; }); // spending anything cleans up
+      state.browseMessage = `New background! Your ${collectionLabel(cid)} Sevlings love the ${sceneDef(cid, id).name}.`;
+      await saveGame(); render();
+    };
+  });
+}
 function renderSevlings(){
   const unlockedCount = game.unlockedSevlings.length;
   const streaks = game.listStreaks || {};
@@ -2178,11 +2227,17 @@ function renderSevlings(){
     ${inProgress.length ? inProgress.map(l=>`<div class="card"><p class="muted" style="text-align:center;margin:0;"><strong>${escapeHtml(l.label)}</strong> (${l.lang==='en'?'English':'Spanish'}): ${sevlingsProgressLine(l.id, l.label)}</p></div>`).join('')
       : `<div class="card"><p class="muted" style="text-align:center;margin:0;">Pick a list and practise it a few times in a row, fully correct, to start winning Sevlings!</p></div>`}
     ${anySevlingNeeds() ? `<div class="card needs-card"><p style="margin:0;"><strong>Some of your Sevlings need looking after!</strong> 🍽️ means hungry, 💩 means they've done a poo. Tap them to feed them or buy them something, until then they can't get any happier.</p></div>` : ''}
+    <div class="btn-row" style="margin:0.6rem 0 0.2rem;"><button class="btn-secondary" id="btn-browse-scenes">🎨 ${state.browseScenesOpen ? 'Hide backgrounds' : 'Browse backgrounds'}</button></div>
+    ${state.browseMessage ? `<p class="care-message" style="text-align:center;">${escapeHtml(state.browseMessage)}</p>` : ''}
+    ${state.browseScenesOpen ? browseScenesHtml() : ''}
     ${COLLECTIONS.map(([id,label])=>`
       <h3 class="section-title" style="margin-top:1.2rem;">${label}</h3>
       <div class="shop-grid">${SEVLINGS.filter(s=>s.collection===id).map(sevlingTile).join('')}</div>
     `).join('')}
   `;
+  state.browseMessage = '';
+  document.getElementById('btn-browse-scenes').onclick = ()=>{ state.browseScenesOpen = !state.browseScenesOpen; render(); };
+  wireBrowseScenes();
   document.querySelectorAll('[data-sevling]').forEach(el=>{
     el.onclick = ()=>{ state.currentSevlingId = el.dataset.sevling; state.jokeRevealed = false; state.scenePickerOpen = false; state.view='sevling-profile'; render(); };
   });
